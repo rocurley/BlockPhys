@@ -1,7 +1,13 @@
+import Prelude hiding (foldr,foldl)
+
 import Graphics.Gloss.Interface.Pure.Game
-import Data.List
+
+import Data.List hiding (foldr,foldl,foldl')
+import Data.Monoid
+import Data.Foldable
 import Control.Arrow
 import Control.Monad
+
 import qualified Data.Map as H
 import qualified Data.Set as S
 
@@ -105,12 +111,13 @@ removeBlock blockKey (World blocks links) =
 
 addBlock :: Block -> World -> World
 addBlock (key @(BlockKey (x,y)),val) (World blocks links) = World (H.insert key val blocks) $
-    (if blockAt (x+1,y) then H.insert (L2R (x  ,y  )) (LinkVal False) else id) $
-    (if blockAt (x-1,y) then H.insert (L2R (x-1,y  )) (LinkVal False) else id) $
-    (if blockAt (x,y-1) then H.insert (D2U (x  ,y-1)) (LinkVal False) else id) $
-    (if blockAt (x,y+1) then H.insert (D2U (x  ,y  )) (LinkVal False) else id) $
-    links
-    where blockAt = (`H.member` blocks) . BlockKey
+    appEndo (foldMap addLink [((x+1,y),L2R (x  ,y  )),
+                              ((x-1,y),L2R (x-1,y  )),
+                              ((x,y-1),D2U (x  ,y-1)),
+                              ((x,y+1),D2U (x  ,y  ))]) links
+    where addLink (pt,linkKey) = Endo $ if (BlockKey pt `H.member` blocks)
+                                        then H.insert linkKey (LinkVal False)
+                                        else id
 
 roundToIntPoint :: Point -> IntPt
 roundToIntPoint (x,y) = (round (x/scaleFactor), round (y/scaleFactor))
