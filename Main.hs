@@ -101,21 +101,20 @@ diamond = translate 0.5 0 $ scale 0.8 0.8 $
                    (l,-0.5+l),(0,-0.5),(-l,-0.5+l)]
           where l = 0.2
 
-possibleLinks :: BlockKey -> [LinkKey]
-possibleLinks (BlockKey (x,y)) =
-    [L2R (x-1,y),L2R (x,y),D2U (x,y-1), D2U (x,y)]
+possibleLinks :: BlockKey -> [(BlockKey,LinkKey)]
+possibleLinks (BlockKey (x,y)) = [(BlockKey (x+1,y),L2R (x  ,y  )),
+                                  (BlockKey (x-1,y),L2R (x-1,y  )),
+                                  (BlockKey (x,y-1),D2U (x  ,y-1)),
+                                  (BlockKey (x,y+1),D2U (x  ,y  ))]
 
 removeBlock :: BlockKey -> World -> World
 removeBlock blockKey (World blocks links) =
-    World (H.delete blockKey blocks) (foldl' (flip H.delete) links $ possibleLinks blockKey)
+    World (H.delete blockKey blocks) (foldl' (flip H.delete) links $ map snd $ possibleLinks blockKey)
 
 addBlock :: Block -> World -> World
 addBlock (key @(BlockKey (x,y)),val) (World blocks links) = World (H.insert key val blocks) $
-    appEndo (foldMap addLink [((x+1,y),L2R (x  ,y  )),
-                              ((x-1,y),L2R (x-1,y  )),
-                              ((x,y-1),D2U (x  ,y-1)),
-                              ((x,y+1),D2U (x  ,y  ))]) links
-    where addLink (pt,linkKey) = Endo $ if (BlockKey pt `H.member` blocks)
+    appEndo (foldMap addLink $ possibleLinks key) links
+    where addLink (block,linkKey) = Endo $ if (block `H.member` blocks)
                                         then H.insert linkKey (LinkVal False)
                                         else id
 
