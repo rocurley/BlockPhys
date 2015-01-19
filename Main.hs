@@ -37,11 +37,11 @@ main = play displayMode white 60
 
 
 type IntPt = (Int,Int)
-data World = World BlockMap LinkMap
+data World = World BlockMap LinkMap [Int]
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 newtype BlockKey = BlockKey IntPt deriving (Eq,Ord,Show)
-newtype BlockVal = BlockVal BlockType deriving (Eq,Ord,Show)
+data BlockVal = BlockVal BlockType Int deriving (Eq,Ord,Show)
 type Block = (BlockKey,BlockVal)
 type BlockMap = H.Map BlockKey BlockVal
 
@@ -60,41 +60,61 @@ data Force = Force {up :: Double, right :: Double, rotCCW :: Double} deriving (S
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 scaleFactor = 80
 blockSize = 0.95
-initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock)) H.empty
+initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0)) H.empty [1..]
 
 renderWorld :: World -> Picture
-renderWorld (World blocks links)= Pictures $ [Pictures $ map renderBlock $ H.toList blocks,
+renderWorld (World blocks links _)= Pictures $ [Pictures $ map renderBlock $ H.toList blocks,
     Pictures $ map renderLink $ H.toList links,debug]
     where debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
 
 handleEvent :: Event -> World -> World
-handleEvent (EventKey (MouseButton LeftButton) Down _ pt) world@(World blocks links) =
+handleEvent (EventKey (MouseButton LeftButton) Down _ pt) world@(World blocks links _) =
     case linkClickCheck links pt of 
         Just linkKey -> handleLinkClick linkKey world
         Nothing -> handleBlockClick (BlockKey $ roundToIntPoint pt) world
 handleEvent _ world = world
 
 handleBlockClick :: BlockKey -> World -> World
-handleBlockClick key world@(World blocks links) =
+handleBlockClick key world@(World blocks _ _) =
     cycleBlock (key,H.lookup key blocks) world
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> World -> World
-          cycleBlock (key,Nothing) world = addBlock (key,BlockVal Normal) world
-          cycleBlock (key,Just (BlockVal Normal)) (World blocks links) =
-              World (H.insert key (BlockVal Bedrock) blocks) links
-          cycleBlock (key,Just (BlockVal Bedrock)) world = removeBlock key world
+          cycleBlock (key,Nothing) (World blocks links (cci:is)) =
+              addBlock (key,BlockVal Normal cci) (World blocks links is)
+          cycleBlock (key,Just (BlockVal Normal cci)) (World blocks links cciList) =
+              World (H.insert key (BlockVal Bedrock cci) blocks) links cciList
+          cycleBlock (key,Just (BlockVal Bedrock cci)) (World blocks links cciList) =
+              removeBlock key (World blocks links (cci:cciList))
 
 handleLinkClick :: LinkKey -> World -> World
-handleLinkClick linkKey (World blocks links) =
-    World blocks $ H.adjust (\ (LinkVal active) -> LinkVal $ not active) linkKey links
+handleLinkClick linkKey world@(World blocks links cciList) = let
+    oldVal = links H.! linkKey
+    (blockA,blockB) = case linkKey of
+        L2R (x,y) -> (BlockKey (x,y), BlockKey (x+1,y))
+        D2U (x,y) -> (BlockKey (x,y), BlockKey (x,y+1))
+    toggleLink :: LinkVal -> World -> World
+    toggleLink (LinkVal False) (World blocks links cciList) = let
+        BlockVal _ cciA = blocks H.! blockA 
+        BlockVal _ cciB = blocks H.! blockB
+        in if cciA == cciB
+           then World blocks (H.insert linkKey (LinkVal True) links) cciList
+           else let
+               (connectedToB,bGrounded) = subgraph blocks links blockB
+               newBlocks = S.fold (H.adjust (\ (BlockVal ty _) -> BlockVal ty cciA))
+                   blocks connectedToB
+               in World newBlocks (H.insert linkKey (LinkVal True) links) (cciB:cciList)
+    in toggleLink oldVal world
 
 renderBlock :: Block -> Picture
-renderBlock (BlockKey (xi,yi), BlockVal blockType) =
-    color c $
+renderBlock (BlockKey (xi,yi), BlockVal blockType cci) =
     scale scaleFactor scaleFactor $
     translate x y $
+    Pictures [
     scale blockSize blockSize $ 
-    Polygon [(-0.5,-0.5),(0.5,-0.5),(0.5,0.5),(-0.5,0.5)]
+    color c $
+    Polygon [(-0.5,-0.5),(0.5,-0.5),(0.5,0.5),(-0.5,0.5)],
+    translate (-0.25) (-0.3) $ scale (0.5/scaleFactor) (0.5/scaleFactor) $
+        color red $ Text $ show cci]
     where x = fromIntegral xi
           y = fromIntegral yi
           c = colorOf blockType
@@ -122,16 +142,16 @@ linkClickCheck :: LinkMap -> Point -> Maybe LinkKey
 linkClickCheck links (x,y) = let
     (xi,xrem) = divMod' (x/scaleFactor) 1
     (yi,yrem) = divMod' (y/scaleFactor) 1
-    u = traceShowId $ xrem + yrem -1
-    v = traceShowId $ yrem - xrem
+    u = xrem + yrem -1
+    v = yrem - xrem
     linkTester :: Point -> LinkKey -> Maybe LinkKey
     linkTester (x,y) link =
-        traceShow (x,y) $ if inDiamond (x,y) && H.member link links then Just link else Nothing
+        if inDiamond (x,y) && H.member link links then Just link else Nothing
     in case (compare u 0,compare v 0) of
-        (LT,LT) -> trace "Case 1" $ traceShow (L2R (xi,yi)) $ linkTester (xrem,yrem)$ L2R (xi,yi) 
-        (LT,GT) -> trace "Case 2" $ traceShow (D2U (xi,yi)) $ linkTester (yrem,xrem) $ D2U (xi,yi) 
-        (GT,LT) -> trace "Case 3" $ traceShow (D2U (xi+1,yi)) $ linkTester (yrem,1-xrem)  $ D2U (xi+1,yi) 
-        (GT,GT) -> trace "Case 4" $ traceShow (L2R (xi,yi+1)) $ linkTester (xrem,1-yrem) $ L2R (xi,yi+1) 
+        (LT,LT) -> linkTester (xrem,yrem)$ L2R (xi,yi) 
+        (LT,GT) -> linkTester (yrem,xrem) $ D2U (xi,yi) 
+        (GT,LT) -> linkTester (yrem,1-xrem)  $ D2U (xi+1,yi) 
+        (GT,GT) -> linkTester (xrem,1-yrem) $ L2R (xi,yi+1) 
         _ -> Nothing -- Nothing on the boundary
 
 inDiamond :: Point -> Bool
@@ -146,12 +166,16 @@ possibleLinks (BlockKey (x,y)) = [(BlockKey (x+1,y),L2R (x  ,y  )),
                                   (BlockKey (x,y+1),D2U (x  ,y  ))]
 
 removeBlock :: BlockKey -> World -> World
-removeBlock blockKey (World blocks links) =
-    World (H.delete blockKey blocks) (foldl' (flip H.delete) links $ map snd $ possibleLinks blockKey)
+removeBlock blockKey (World blocks links cciList) =
+    World (H.delete blockKey blocks)
+        (foldl' (flip H.delete) links $ map snd $ possibleLinks blockKey)
+        cciList
 
 addBlock :: Block -> World -> World
-addBlock (key @(BlockKey (x,y)),val) (World blocks links) = World (H.insert key val blocks) $
-    appEndo (foldMap addLink $ possibleLinks key) links
+addBlock (key @(BlockKey (x,y)),val) (World blocks links cciList) =
+    World (H.insert key val blocks)
+        (appEndo (foldMap addLink $ possibleLinks key) links)
+        cciList
     where addLink (block,linkKey) = Endo $ if (block `H.member` blocks)
                                         then H.insert linkKey (LinkVal False)
                                         else id
@@ -159,26 +183,26 @@ addBlock (key @(BlockKey (x,y)),val) (World blocks links) = World (H.insert key 
 roundToIntPoint :: Point -> IntPt
 roundToIntPoint (x,y) = (round (x/scaleFactor), round (y/scaleFactor))
 
-cycleBlockVal :: Maybe BlockVal -> Maybe BlockVal
-cycleBlockVal Nothing                   = Just $ BlockVal Normal
-cycleBlockVal (Just (BlockVal Normal))  = Just $ BlockVal Bedrock
-cycleBlockVal (Just (BlockVal Bedrock)) = Nothing
-
 connectedNeighbors :: BlockKey -> LinkMap -> [BlockKey]
 connectedNeighbors blockKey links =
-    [blockKey|(blockKey,linkKey) <- possibleLinks blockKey,active $ links H.! linkKey]
+    [blockKey|(blockKey,linkKey) <- possibleLinks blockKey,
+        Just (LinkVal True) == H.lookup linkKey links]
 
 subgraph :: BlockMap -> LinkMap -> BlockKey -> (S.Set BlockKey,Bool)
 subgraph blocks links key = dfs [key] (S.empty,False) where
+    isBedrock :: BlockVal -> Bool
+    isBedrock (BlockVal Bedrock _) = True
+    isBedrock (BlockVal _ _) = False
     dfs :: [BlockKey] -> (S.Set BlockKey,Bool) -> (S.Set BlockKey,Bool)
     dfs [] out = out
     dfs (x:xs) (visited,grounded)
         |x `S.member` visited = dfs xs (visited,grounded)
         |otherwise =
             let new = connectedNeighbors x links
-                acc = foldl' (\ (visited,grounded) blockKey ->
-                    (S.insert blockKey visited, grounded && (blocks H.! blockKey == BlockVal Bedrock)))
-                    (visited,grounded) new
+                acc = (S.insert x visited, isBedrock (blocks H.! x) || grounded) 
+                --acc = foldl' (\ (visited,grounded) blockKey ->
+                --    (S.insert blockKey visited, grounded && (isBedrock $ blocks H.! blockKey)))
+                --    (visited,grounded) new
                 in dfs (new ++ xs) acc
 
 
