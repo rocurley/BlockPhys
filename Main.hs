@@ -8,6 +8,7 @@ import Data.Foldable
 import Data.Fixed
 import Data.Traversable
 import Control.Arrow
+import Control.Applicative
 import Control.Monad hiding (mapM,mapM_)
 import Control.Monad.State.Lazy hiding (mapM,mapM_)
 
@@ -32,7 +33,7 @@ main = play displayMode white 60
 --    intermediate positions.
 -- Compute connected subgraphs starting at bedrocks, and color disconnected blocks
 --    differently.
--- Refactor into the state monad
+-- Recover CCi from deleted blocks
 
 
 
@@ -66,6 +67,9 @@ getBlocks = do
     World blocks _ _ <- get
     return blocks
 
+lookupBlock :: BlockKey -> State World BlockVal
+lookupBlock blockKey = (H.! blockKey) <$> getBlocks
+
 setBlock :: BlockKey -> Maybe BlockVal -> State World ()
 setBlock blockKey blockVal = do
     World blocks links cci <- get
@@ -81,10 +85,18 @@ getLinks = do
     World _ links _ <- get
     return links
 
+lookupLink :: LinkKey -> State World LinkVal
+lookupLink linkKey = (H.! linkKey) <$> getLinks
+
 setLink :: LinkKey -> Maybe LinkVal -> State World ()
 setLink linkKey linkVal = do
     World blocks links cci <- get
     put $ World blocks(H.alter (const linkVal) linkKey links) cci 
+
+alterLink :: LinkKey -> (Maybe LinkVal -> Maybe LinkVal) -> State World ()
+alterLink linkKey f = do
+    World blocks links cci <- get
+    put $ World blocks (H.alter f linkKey links) cci 
 
 popCci :: State World Int
 popCci = do
@@ -119,19 +131,19 @@ handleEvent _ = id
 handleBlockClick :: BlockKey -> State World ()
 handleBlockClick key  = do
     world@(World blocks _ _) <- get
-    put $ cycleBlock (key,H.lookup key blocks) world
-    where cycleBlock :: (BlockKey,Maybe BlockVal) -> World -> World
-          cycleBlock (key,Nothing) (World blocks links (cci:is)) =
-              addBlock (key,BlockVal Normal cci) (World blocks links is)
-          cycleBlock (key,Just (BlockVal Normal cci)) (World blocks links cciList) =
-              World (H.insert key (BlockVal Bedrock cci) blocks) links cciList
-          cycleBlock (key,Just (BlockVal Bedrock cci)) (World blocks links cciList) =
-              removeBlock key (World blocks links (cci:cciList))
+    cycleBlock (key,H.lookup key blocks)
+    where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
+          cycleBlock (key,Nothing) = do
+              cci <- popCci
+              addBlock (key,BlockVal Normal cci)
+          cycleBlock (key,Just (BlockVal Normal cci)) =
+              setBlock key $ Just (BlockVal Bedrock cci)
+          cycleBlock (key,Just (BlockVal Bedrock cci)) = removeBlock key
 
 handleLinkClick :: LinkKey -> State World ()
 handleLinkClick linkKey = do
-    links <- getLinks
-    case links H.! linkKey of
+    link <- lookupLink linkKey
+    case link of
         LinkVal True  -> linkOff linkKey
         LinkVal False -> linkOn  linkKey
 
@@ -142,10 +154,8 @@ linkedBlocks (D2U (x,y)) = (BlockKey (x,y), BlockKey (x,y+1))
 linkOff :: LinkKey -> State World ()
 linkOff linkKey = do
     setLink linkKey $ Just $ LinkVal False
-    links <- getLinks
-    blocks <- getBlocks
     let (blockA,blockB) = linkedBlocks linkKey 
-    let (connectedToB,bGrounded) = subgraph blocks links blockB
+    (connectedToB,bGrounded) <- subgraph blockB
     if S.member blockA connectedToB
     then return ()
     else do
@@ -155,12 +165,10 @@ linkOff linkKey = do
 
 linkOn :: LinkKey -> State World ()
 linkOn linkKey = do
-    links <- getLinks
-    blocks <- getBlocks
     let (blockA,blockB) = linkedBlocks linkKey
-    let BlockVal _ cciA = blocks H.! blockA 
-    let BlockVal _ cciB = blocks H.! blockB
-    let (connectedToB,bGrounded) = subgraph blocks links blockB
+    BlockVal _ cciA <- lookupBlock blockA 
+    BlockVal _ cciB <- lookupBlock blockB
+    (connectedToB,bGrounded) <- subgraph blockB
     setLink linkKey $ Just $ LinkVal True
     if cciA == cciB
     then return ()
@@ -232,49 +240,45 @@ possibleLinks (BlockKey (x,y)) = [(BlockKey (x+1,y),L2R (x  ,y  )),
                                   (BlockKey (x,y-1),D2U (x  ,y-1)),
                                   (BlockKey (x,y+1),D2U (x  ,y  ))]
 
-removeBlock :: BlockKey -> World -> World
-removeBlock blockKey (World blocks links cciList) =
-    World (H.delete blockKey blocks)
-        (foldl' (flip H.delete) links $ map snd $ possibleLinks blockKey)
-        cciList
+removeBlock :: BlockKey -> State World ()
+removeBlock blockKey = do
+    setBlock blockKey Nothing
+    mapM_ ((`setLink` Nothing) . snd ) $ possibleLinks blockKey
 
-addBlock :: Block -> World -> World
-addBlock (key @(BlockKey (x,y)),val) (World blocks links cciList) =
-    World (H.insert key val blocks)
-        (appEndo (foldMap addLink $ possibleLinks key) links)
-        cciList
-    where addLink (block,linkKey) = Endo $ if (block `H.member` blocks)
-                                        then H.insert linkKey (LinkVal False)
-                                        else id
+addBlock :: Block -> State World ()
+addBlock (blockKey @(BlockKey (x,y)),val) = do
+    setBlock blockKey $ Just val
+    mapM_ addLink $ possibleLinks blockKey
+    where
+        addLink (blockKey,linkKey) = do
+            blocks <- getBlocks
+            if (blockKey `H.member` blocks)
+            then setLink linkKey (Just $ LinkVal False) 
+            else return ()
 
 roundToIntPoint :: Point -> IntPt
 roundToIntPoint (x,y) = (round (x/scaleFactor), round (y/scaleFactor))
 
-connectedNeighbors :: BlockKey -> LinkMap -> [BlockKey]
-connectedNeighbors blockKey links =
-    [blockKey|(blockKey,linkKey) <- possibleLinks blockKey,
+connectedNeighbors :: BlockKey -> State World [BlockKey]
+connectedNeighbors blockKey = do
+    links <- getLinks
+    return [blockKey|(blockKey,linkKey) <- possibleLinks blockKey,
         Just (LinkVal True) == H.lookup linkKey links]
 
-subgraph :: BlockMap -> LinkMap -> BlockKey -> (S.Set BlockKey,Bool)
-subgraph blocks links key = dfs [key] (S.empty,False) where
-    isBedrock :: BlockVal -> Bool
-    isBedrock (BlockVal Bedrock _) = True
-    isBedrock (BlockVal _ _) = False
-    dfs :: [BlockKey] -> (S.Set BlockKey,Bool) -> (S.Set BlockKey,Bool)
-    dfs [] out = out
+subgraph :: BlockKey -> State World (S.Set BlockKey,Bool)
+subgraph blockKey = dfs [blockKey] (S.empty,False) where
+    isBedrock :: BlockKey -> State World Bool
+    isBedrock blockKey = do
+        block <- lookupBlock blockKey
+        case block of
+            BlockVal Bedrock _ -> return True
+            BlockVal _ _ -> return False 
+    dfs :: [BlockKey] -> (S.Set BlockKey,Bool) -> State World (S.Set BlockKey,Bool)
+    dfs [] out = return out
     dfs (x:xs) (visited,grounded)
         |x `S.member` visited = dfs xs (visited,grounded)
-        |otherwise =
-            let new = connectedNeighbors x links
-                acc = (S.insert x visited, isBedrock (blocks H.! x) || grounded) 
-                --acc = foldl' (\ (visited,grounded) blockKey ->
-                --    (S.insert blockKey visited, grounded && (isBedrock $ blocks H.! blockKey)))
-                --    (visited,grounded) new
-                in dfs (new ++ xs) acc
-
-
-partitionBlocks :: BlockMap -> LinkMap -> [(S.Set BlockKey,Bool)]
-partitionBlocks blocks links
-    |H.null blocks = []
-    |otherwise = let (sg,grounded) = subgraph blocks links (head $ H.keys blocks)
-                     in (sg,grounded) : partitionBlocks (foldl' (flip H.delete) blocks sg) links
+        |otherwise = do
+            new <- connectedNeighbors x
+            newGrounded <- (grounded ||) <$> isBedrock x
+            let acc = (S.insert x visited, newGrounded)
+            dfs (new ++ xs) acc
