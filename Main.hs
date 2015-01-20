@@ -1,4 +1,4 @@
-import Prelude hiding (foldr,foldl)
+import Prelude hiding (foldr,foldl,mapM,mapM_,sequence)
 
 import Graphics.Gloss.Interface.Pure.Game
 
@@ -6,8 +6,10 @@ import Data.List hiding (foldr,foldl,foldl')
 import Data.Monoid
 import Data.Foldable
 import Data.Fixed
+import Data.Traversable
 import Control.Arrow
-import Control.Monad
+import Control.Monad hiding (mapM,mapM_)
+import Control.Monad.State.Lazy hiding (mapM,mapM_)
 
 import Debug.Trace
 
@@ -30,6 +32,7 @@ main = play displayMode white 60
 --    intermediate positions.
 -- Compute connected subgraphs starting at bedrocks, and color disconnected blocks
 --    differently.
+-- Refactor into the state monad
 
 
 
@@ -37,7 +40,6 @@ main = play displayMode white 60
 
 
 type IntPt = (Int,Int)
-data World = World BlockMap LinkMap [Int]
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 newtype BlockKey = BlockKey IntPt deriving (Eq,Ord,Show)
@@ -57,6 +59,44 @@ type LinkMap  = H.Map LinkKey LinkVal
 
 data Force = Force {up :: Double, right :: Double, rotCCW :: Double} deriving (Show)
 
+data World = World BlockMap LinkMap [Int]
+
+getBlocks :: State World BlockMap
+getBlocks = do
+    World blocks _ _ <- get
+    return blocks
+
+setBlock :: BlockKey -> Maybe BlockVal -> State World ()
+setBlock blockKey blockVal = do
+    World blocks links cci <- get
+    put $ World (H.alter (const blockVal) blockKey blocks) links cci 
+
+alterBlock :: BlockKey -> (Maybe BlockVal -> Maybe BlockVal) -> State World ()
+alterBlock blockKey f = do
+    World blocks links cci <- get
+    put $ World (H.alter f blockKey blocks) links cci 
+
+getLinks :: State World LinkMap
+getLinks = do
+    World _ links _ <- get
+    return links
+
+setLink :: LinkKey -> Maybe LinkVal -> State World ()
+setLink linkKey linkVal = do
+    World blocks links cci <- get
+    put $ World blocks(H.alter (const linkVal) linkKey links) cci 
+
+popCci :: State World Int
+popCci = do
+    World blocks links (i:is) <- get
+    put $ World blocks links is
+    return i
+
+pushCci :: Int -> State World ()
+pushCci i = do
+    World blocks links (is) <- get
+    put $ World blocks links $ i:is
+
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 scaleFactor = 80
 blockSize = 0.95
@@ -69,15 +109,17 @@ renderWorld (World blocks links _)= Pictures $ [Pictures $ map renderBlock $ H.t
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
 
 handleEvent :: Event -> World -> World
-handleEvent (EventKey (MouseButton LeftButton) Down _ pt) world@(World blocks links _) =
-    case linkClickCheck links pt of 
-        Just linkKey -> handleLinkClick linkKey world
-        Nothing -> handleBlockClick (BlockKey $ roundToIntPoint pt) world
-handleEvent _ world = world
+handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
+    linkClicked <- linkClickCheck pt
+    case linkClicked of 
+        Just linkKey -> handleLinkClick linkKey
+        Nothing -> handleBlockClick (BlockKey $ roundToIntPoint pt)
+handleEvent _ = id
 
-handleBlockClick :: BlockKey -> World -> World
-handleBlockClick key world@(World blocks _ _) =
-    cycleBlock (key,H.lookup key blocks) world
+handleBlockClick :: BlockKey -> State World ()
+handleBlockClick key  = do
+    world@(World blocks _ _) <- get
+    put $ cycleBlock (key,H.lookup key blocks) world
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> World -> World
           cycleBlock (key,Nothing) (World blocks links (cci:is)) =
               addBlock (key,BlockVal Normal cci) (World blocks links is)
@@ -86,24 +128,46 @@ handleBlockClick key world@(World blocks _ _) =
           cycleBlock (key,Just (BlockVal Bedrock cci)) (World blocks links cciList) =
               removeBlock key (World blocks links (cci:cciList))
 
-handleLinkClick :: LinkKey -> World -> World
-handleLinkClick linkKey world@(World blocks links cciList) = let
-    oldVal = links H.! linkKey
-    (blockA,blockB) = case linkKey of
-        L2R (x,y) -> (BlockKey (x,y), BlockKey (x+1,y))
-        D2U (x,y) -> (BlockKey (x,y), BlockKey (x,y+1))
-    toggleLink :: LinkVal -> World -> World
-    toggleLink (LinkVal False) (World blocks links cciList) = let
-        BlockVal _ cciA = blocks H.! blockA 
-        BlockVal _ cciB = blocks H.! blockB
-        in if cciA == cciB
-           then World blocks (H.insert linkKey (LinkVal True) links) cciList
-           else let
-               (connectedToB,bGrounded) = subgraph blocks links blockB
-               newBlocks = S.fold (H.adjust (\ (BlockVal ty _) -> BlockVal ty cciA))
-                   blocks connectedToB
-               in World newBlocks (H.insert linkKey (LinkVal True) links) (cciB:cciList)
-    in toggleLink oldVal world
+handleLinkClick :: LinkKey -> State World ()
+handleLinkClick linkKey = do
+    links <- getLinks
+    case links H.! linkKey of
+        LinkVal True  -> linkOff linkKey
+        LinkVal False -> linkOn  linkKey
+
+linkedBlocks :: LinkKey -> (BlockKey,BlockKey)
+linkedBlocks (L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))
+linkedBlocks (D2U (x,y)) = (BlockKey (x,y), BlockKey (x,y+1))
+
+linkOff :: LinkKey -> State World ()
+linkOff linkKey = do
+    setLink linkKey $ Just $ LinkVal False
+    links <- getLinks
+    blocks <- getBlocks
+    let (blockA,blockB) = linkedBlocks linkKey 
+    let (connectedToB,bGrounded) = subgraph blocks links blockB
+    if S.member blockA connectedToB
+    then return ()
+    else do
+        cci <- popCci
+        mapM_ (`alterBlock` (\ (Just (BlockVal ty _)) ->
+            Just $ BlockVal ty cci)) connectedToB
+
+linkOn :: LinkKey -> State World ()
+linkOn linkKey = do
+    links <- getLinks
+    blocks <- getBlocks
+    let (blockA,blockB) = linkedBlocks linkKey
+    let BlockVal _ cciA = blocks H.! blockA 
+    let BlockVal _ cciB = blocks H.! blockB
+    let (connectedToB,bGrounded) = subgraph blocks links blockB
+    setLink linkKey $ Just $ LinkVal True
+    if cciA == cciB
+    then return ()
+    else do
+        pushCci cciB
+        mapM_ (`alterBlock` (\ ( Just (BlockVal ty _)) ->
+            Just $ BlockVal ty cciA)) connectedToB
 
 renderBlock :: Block -> Picture
 renderBlock (BlockKey (xi,yi), BlockVal blockType cci) =
@@ -138,21 +202,24 @@ diamond = translate 0.5 0 $ scale 0.8 0.8 $
                    (l,-0.5+l),(0,-0.5),(-l,-0.5+l)]
           where l = 0.2
 
-linkClickCheck :: LinkMap -> Point -> Maybe LinkKey
-linkClickCheck links (x,y) = let
+linkClickCheck :: Point -> State World (Maybe LinkKey)
+linkClickCheck (x,y) = let
     (xi,xrem) = divMod' (x/scaleFactor) 1
     (yi,yrem) = divMod' (y/scaleFactor) 1
     u = xrem + yrem -1
     v = yrem - xrem
-    linkTester :: Point -> LinkKey -> Maybe LinkKey
-    linkTester (x,y) link =
-        if inDiamond (x,y) && H.member link links then Just link else Nothing
+    linkTester :: Point -> LinkKey -> State World (Maybe LinkKey)
+    linkTester (x,y) link = do
+        links <- getLinks
+        return $ if inDiamond (x,y) && H.member link links
+                 then Just link
+                 else Nothing
     in case (compare u 0,compare v 0) of
         (LT,LT) -> linkTester (xrem,yrem)$ L2R (xi,yi) 
         (LT,GT) -> linkTester (yrem,xrem) $ D2U (xi,yi) 
         (GT,LT) -> linkTester (yrem,1-xrem)  $ D2U (xi+1,yi) 
         (GT,GT) -> linkTester (xrem,1-yrem) $ L2R (xi,yi+1) 
-        _ -> Nothing -- Nothing on the boundary
+        _ -> return Nothing -- Nothing on the boundary
 
 inDiamond :: Point -> Bool
 inDiamond (x,y) = x'+y'<0.5 && x' < 0.2 && y' < 0.5
