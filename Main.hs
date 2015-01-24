@@ -12,7 +12,7 @@ import Data.Maybe
 import Control.Arrow
 import Control.Applicative
 import Control.Monad hiding (mapM,mapM_)
-import Control.Monad.State.Lazy hiding (mapM,mapM_)
+import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Control.Monad.Trans.Maybe
 
 import Debug.Trace
@@ -34,9 +34,7 @@ main = play displayMode white 60
 --Figure out a way to make the whole darn program not crash if there's no bedrock.
 --The block coordinate system uses integers, but falling pieces can be at
 --    intermediate positions.
--- Compute connected subgraphs starting at bedrocks, and color disconnected blocks
---    differently.
-
+--Modules! World sounds like a good place to start! Physics would be good too.
 
 
 
@@ -60,11 +58,16 @@ type LinkMap  = H.Map LinkKey LinkVal
 
 data Force = Force {up :: Double, right :: Double, rotCCW :: Double} deriving (Show)
 
-data World = World BlockMap LinkMap [Int]
+type CConKey = Int
+type CConVal = Int
+type CCon = (CConKey,CConVal)
+type CConMap = H.Map CConKey CConVal
+
+data World = World BlockMap LinkMap CConMap [Int]
 
 getBlocks :: State World BlockMap
 getBlocks = do
-    World blocks _ _ <- get
+    World blocks _ _ _ <- get
     return blocks
 
 lookupBlock :: BlockKey -> State World (Maybe BlockVal)
@@ -72,17 +75,17 @@ lookupBlock blockKey = H.lookup blockKey <$> getBlocks
 
 setBlock :: BlockKey -> Maybe BlockVal -> State World ()
 setBlock blockKey blockVal = do
-    World blocks links cci <- get
-    put $ World (H.alter (const blockVal) blockKey blocks) links cci 
+    World blocks links cCons cci <- get
+    put $ World (H.alter (const blockVal) blockKey blocks) links cCons cci 
 
 alterBlock :: BlockKey -> (Maybe BlockVal -> Maybe BlockVal) -> State World ()
 alterBlock blockKey f = do
-    World blocks links cci <- get
-    put $ World (H.alter f blockKey blocks) links cci 
+    World blocks links cCons cci <- get
+    put $ World (H.alter f blockKey blocks) links cCons cci 
 
 getLinks :: State World LinkMap
 getLinks = do
-    World _ links _ <- get
+    World _ links _ _ <- get
     return links
 
 lookupLink :: LinkKey -> State World (Maybe LinkVal)
@@ -90,32 +93,49 @@ lookupLink linkKey = H.lookup linkKey <$> getLinks
 
 setLink :: LinkKey -> Maybe LinkVal -> State World ()
 setLink linkKey linkVal = do
-    World blocks links cci <- get
-    put $ World blocks(H.alter (const linkVal) linkKey links) cci 
+    World blocks links cCons cci <- get
+    put $ World blocks(H.alter (const linkVal) linkKey links) cCons cci 
 
 alterLink :: LinkKey -> (Maybe LinkVal -> Maybe LinkVal) -> State World ()
 alterLink linkKey f = do
-    World blocks links cci <- get
-    put $ World blocks (H.alter f linkKey links) cci 
+    World blocks links cCons cci <- get
+    put $ World blocks (H.alter f linkKey links) cCons cci 
 
-popCci :: State World Int
-popCci = do
-    World blocks links (i:is) <- get
-    put $ World blocks links is
+popCci :: CConVal -> State World Int
+popCci grounded = do
+    World blocks links cCons (i:is) <- get
+    put $ World blocks links (H.insert i grounded cCons) is
     return i
 
 pushCci :: Int -> State World ()
 pushCci i = do
-    World blocks links is <- get
-    put $ World blocks links $ i:is
+    World blocks links cCons is <- get
+    put $ World blocks links (H.delete i cCons) $ i:is
+
+setCc :: Int -> CConVal -> State World ()
+setCc i grounded = do
+    World blocks links cCons is <- get
+    put $ World blocks links (H.insert i grounded cCons) $ is
+
+getCc :: Int -> State World (Maybe CConVal)
+getCc i = do
+    World _ _ cCons _ <- get
+    return $ H.lookup i cCons
+
+adjustCc :: (CConVal -> CConVal) -> CConKey -> State World ()
+adjustCc f key = do
+    World blocks links cCons is <- get
+    put $ World blocks links (H.adjust f key cCons) is
 
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 scaleFactor = 80
 blockSize = 0.95
-initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0)) H.empty [1..]
+initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0))
+    H.empty (H.singleton 0 1) [1..]
 
 renderWorld :: World -> Picture
-renderWorld (World blocks links _)= Pictures [Pictures $ map renderBlock $ H.toList blocks,
+renderWorld world@(World blocks links _ _)= Pictures [
+    Pictures $ (`evalState` world) $ mapM renderBlock $ H.keys blocks,
     Pictures $ map renderLink $ H.toList links,debug]
     where debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
@@ -130,13 +150,14 @@ handleEvent _ = id
 
 handleBlockClick :: BlockKey -> State World ()
 handleBlockClick key  = do
-    world@(World blocks _ _) <- get
+    world@(World blocks _ _ _) <- get
     cycleBlock (key,H.lookup key blocks)
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
           cycleBlock (key,Nothing) = do
-              cci <- popCci
+              cci <- popCci 0
               addBlock (key,BlockVal Normal cci)
-          cycleBlock (key,Just (BlockVal Normal cci)) =
+          cycleBlock (key,Just (BlockVal Normal cci)) = do
+              adjustCc (+1) cci
               setBlock key $ Just (BlockVal Bedrock cci)
           cycleBlock (key,Just (BlockVal Bedrock cci)) = void $ removeBlock key
 
@@ -156,10 +177,13 @@ linkOff :: LinkKey -> State World Bool
 linkOff linkKey = fmap isJust $ runMaybeT $ do
     linkVal <- MaybeT $ lookupLink linkKey
     lift $ setLink linkKey $ Just $ LinkVal False
-    let (blockA,blockB) = linkedBlocks linkKey 
+    let (blockA,blockB) = linkedBlocks linkKey
+    (BlockVal _ ccKeyA) <- MaybeT $ lookupBlock blockA
+    grounded <- MaybeT $ getCc ccKeyA
     (connectedToB,bGrounded) <- lift $ subgraph blockB
     unless (S.member blockA connectedToB) $ do
-        cci <- lift popCci
+        lift $ adjustCc (subtract bGrounded) ccKeyA
+        cci <- lift $ popCci bGrounded
         lift $ mapM_ (`alterBlock` (\ (Just (BlockVal ty _)) ->
             Just $ BlockVal ty cci)) connectedToB
 
@@ -169,28 +193,32 @@ linkOn linkKey = fmap isJust $ runMaybeT $ do
     let (blockA,blockB) = linkedBlocks linkKey
     BlockVal _ cciA <- MaybeT $ lookupBlock blockA 
     BlockVal _ cciB <- MaybeT $ lookupBlock blockB
+    aGrounded <- MaybeT $ getCc cciA
     (connectedToB,bGrounded) <- lift $ subgraph blockB
     lift $ setLink linkKey $ Just $ LinkVal True
     unless (cciA == cciB) $ do
+        lift $ setCc cciA (aGrounded + bGrounded)
         lift $ pushCci cciB
         lift $ mapM_ (`alterBlock` (\ ( Just (BlockVal ty _)) ->
             Just $ BlockVal ty cciA)) connectedToB
 
-renderBlock :: Block -> Picture
-renderBlock (BlockKey (xi,yi), BlockVal blockType cci) =
-    scale scaleFactor scaleFactor $
-    translate x y $
-    Pictures [
-    scale blockSize blockSize $ 
-    color c $
-    Polygon [(-0.5,-0.5),(0.5,-0.5),(0.5,0.5),(-0.5,0.5)],
-    translate (-0.25) (-0.3) $ scale (0.5/scaleFactor) (0.5/scaleFactor) $
-        color red $ Text $ show cci]
-    where x = fromIntegral xi
-          y = fromIntegral yi
-          c = colorOf blockType
-          colorOf Normal  = greyN 0.4
-          colorOf Bedrock = black
+renderBlock :: BlockKey -> State World Picture
+renderBlock blockKey@(BlockKey (xi,yi)) = do
+    BlockVal blockType cci <- fromJust <$> lookupBlock blockKey
+    grounded <- fromJust <$> getCc cci
+    let (x,y) = (fromIntegral xi, fromIntegral yi)
+    let c = case (blockType,grounded>0) of
+            (Normal,True)  -> greyN 0.3
+            (Normal,False) -> greyN 0.6
+            (Bedrock,_)    -> black
+    return $ scale scaleFactor scaleFactor $
+        translate x y $
+        Pictures [
+        scale blockSize blockSize $ 
+        color c $
+        Polygon [(-0.5,-0.5),(0.5,-0.5),(0.5,0.5),(-0.5,0.5)],
+        translate (-0.25) (-0.3) $ scale (0.5/scaleFactor) (0.5/scaleFactor) $
+            color red $ Text $ show cci]
 
 renderLink :: Link -> Picture
 renderLink (L2R (xi,yi),LinkVal active) = color c $ scale scaleFactor scaleFactor $
@@ -266,20 +294,20 @@ connectedNeighbors blockKey = do
     return [blockKey|(blockKey,linkKey) <- possibleLinks blockKey,
         Just (LinkVal True) == H.lookup linkKey links]
 
-subgraph :: BlockKey -> State World (S.Set BlockKey,Bool)
-subgraph blockKey = dfs [blockKey] (S.empty,False) where
-    isBedrock :: BlockKey -> State World Bool
+subgraph :: BlockKey -> State World (S.Set BlockKey,Int)
+subgraph blockKey = dfs [blockKey] (S.empty,0) where
+    isBedrock :: BlockKey -> State World Int
     isBedrock blockKey = do
         block <- lookupBlock blockKey
         case block of
-            Just (BlockVal Bedrock _) -> return True
-            Just (BlockVal _ _) -> return False 
-    dfs :: [BlockKey] -> (S.Set BlockKey,Bool) -> State World (S.Set BlockKey,Bool)
+            Just (BlockVal Bedrock _) -> return 1
+            Just (BlockVal _ _) -> return 0 
+    dfs :: [BlockKey] -> (S.Set BlockKey,Int) -> State World (S.Set BlockKey,Int)
     dfs [] out = return out
     dfs (x:xs) (visited,grounded)
         |x `S.member` visited = dfs xs (visited,grounded)
         |otherwise = do
             new <- connectedNeighbors x
-            newGrounded <- (grounded ||) <$> isBedrock x
+            newGrounded <- (grounded +) <$> isBedrock x
             let acc = (S.insert x visited, newGrounded)
             dfs (new ++ xs) acc
