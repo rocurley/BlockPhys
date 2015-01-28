@@ -20,112 +20,22 @@ import Debug.Trace
 import qualified Data.Map as H
 import qualified Data.Set as S
 
+import World
+import Physics
+
 main = play displayMode white 60
     initialWorld
     renderWorld
     handleEvent
     (const id)
  
-
-
 --TODO:
 
 --Make it possible to run the physics sim and display the output in some legible way
 --Figure out a way to make the whole darn program not crash if there's no bedrock.
 --The block coordinate system uses integers, but falling pieces can be at
 --    intermediate positions.
---Modules! World sounds like a good place to start! Physics would be good too.
-
-
-
-type IntPt = (Int,Int)
-
-data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
-newtype BlockKey = BlockKey IntPt deriving (Eq,Ord,Show)
-data BlockVal = BlockVal BlockType Int deriving (Eq,Ord,Show)
-type Block = (BlockKey,BlockVal)
-type BlockMap = H.Map BlockKey BlockVal
-
---I don't like that this can represent invalid states, but the validitiy of a link is
---pretty much tied to the global state, so I don't think it can be cromulently enforced
---by the type system. (Why haven't you learned Agda again?)
-
-data LinkKey = L2R IntPt | D2U IntPt deriving (Eq,Ord,Show)
-newtype LinkVal = LinkVal {active :: Bool} deriving (Eq,Ord,Show)
-type Link = (LinkKey,LinkVal)
-type LinkMap  = H.Map LinkKey LinkVal
-
-
-data Force = Force {up :: Double, right :: Double, rotCCW :: Double} deriving (Show)
-
-type CConKey = Int
-type CConVal = Int
-type CCon = (CConKey,CConVal)
-type CConMap = H.Map CConKey CConVal
-
-data World = World BlockMap LinkMap CConMap [Int]
-
-getBlocks :: State World BlockMap
-getBlocks = do
-    World blocks _ _ _ <- get
-    return blocks
-
-lookupBlock :: BlockKey -> State World (Maybe BlockVal)
-lookupBlock blockKey = H.lookup blockKey <$> getBlocks
-
-setBlock :: BlockKey -> Maybe BlockVal -> State World ()
-setBlock blockKey blockVal = do
-    World blocks links cCons cci <- get
-    put $ World (H.alter (const blockVal) blockKey blocks) links cCons cci 
-
-alterBlock :: BlockKey -> (Maybe BlockVal -> Maybe BlockVal) -> State World ()
-alterBlock blockKey f = do
-    World blocks links cCons cci <- get
-    put $ World (H.alter f blockKey blocks) links cCons cci 
-
-getLinks :: State World LinkMap
-getLinks = do
-    World _ links _ _ <- get
-    return links
-
-lookupLink :: LinkKey -> State World (Maybe LinkVal)
-lookupLink linkKey = H.lookup linkKey <$> getLinks
-
-setLink :: LinkKey -> Maybe LinkVal -> State World ()
-setLink linkKey linkVal = do
-    World blocks links cCons cci <- get
-    put $ World blocks(H.alter (const linkVal) linkKey links) cCons cci 
-
-alterLink :: LinkKey -> (Maybe LinkVal -> Maybe LinkVal) -> State World ()
-alterLink linkKey f = do
-    World blocks links cCons cci <- get
-    put $ World blocks (H.alter f linkKey links) cCons cci 
-
-popCci :: CConVal -> State World Int
-popCci grounded = do
-    World blocks links cCons (i:is) <- get
-    put $ World blocks links (H.insert i grounded cCons) is
-    return i
-
-pushCci :: Int -> State World ()
-pushCci i = do
-    World blocks links cCons is <- get
-    put $ World blocks links (H.delete i cCons) $ i:is
-
-setCc :: Int -> CConVal -> State World ()
-setCc i grounded = do
-    World blocks links cCons is <- get
-    put $ World blocks links (H.insert i grounded cCons) $ is
-
-getCc :: Int -> State World (Maybe CConVal)
-getCc i = do
-    World _ _ cCons _ <- get
-    return $ H.lookup i cCons
-
-adjustCc :: (CConVal -> CConVal) -> CConKey -> State World ()
-adjustCc f key = do
-    World blocks links cCons is <- get
-    put $ World blocks links (H.adjust f key cCons) is
+-- Needs a lens refactor
 
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 scaleFactor = 80
@@ -152,6 +62,7 @@ handleBlockClick :: BlockKey -> State World ()
 handleBlockClick key  = do
     world@(World blocks _ _ _) <- get
     cycleBlock (key,H.lookup key blocks)
+    setForces
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
           cycleBlock (key,Nothing) = do
               cci <- popCci 0
@@ -164,19 +75,16 @@ handleBlockClick key  = do
 handleLinkClick :: LinkKey -> State World ()
 handleLinkClick linkKey = do
     link <- lookupLink linkKey
-    case link of --Should never get a Nothing.
-        Just (LinkVal True)  -> linkOff linkKey
-        Just (LinkVal False) -> linkOn  linkKey
-    return ()
-
-linkedBlocks :: LinkKey -> (BlockKey,BlockKey)
-linkedBlocks (L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))
-linkedBlocks (D2U (x,y)) = (BlockKey (x,y), BlockKey (x,y+1))
+    case link of
+        Just OffLink    -> linkOn linkKey force0
+        Just (OnLink _) -> linkOff linkKey
+        Nothing -> error "handleLinkClick got a missing Link"
+    setForces
 
 linkOff :: LinkKey -> State World Bool
 linkOff linkKey = fmap isJust $ runMaybeT $ do
     linkVal <- MaybeT $ lookupLink linkKey
-    lift $ setLink linkKey $ Just $ LinkVal False
+    lift $ setLink linkKey $ Just OffLink
     let (blockA,blockB) = linkedBlocks linkKey
     (BlockVal _ ccKeyA) <- MaybeT $ lookupBlock blockA
     grounded <- MaybeT $ getCc ccKeyA
@@ -187,15 +95,15 @@ linkOff linkKey = fmap isJust $ runMaybeT $ do
         lift $ mapM_ (`alterBlock` (\ (Just (BlockVal ty _)) ->
             Just $ BlockVal ty cci)) connectedToB
 
-linkOn :: LinkKey -> State World Bool
-linkOn linkKey = fmap isJust $ runMaybeT $ do
+linkOn :: LinkKey -> Force -> State World Bool
+linkOn linkKey force = fmap isJust $ runMaybeT $ do
     linkVal <- MaybeT $ lookupLink linkKey
     let (blockA,blockB) = linkedBlocks linkKey
     BlockVal _ cciA <- MaybeT $ lookupBlock blockA 
     BlockVal _ cciB <- MaybeT $ lookupBlock blockB
     aGrounded <- MaybeT $ getCc cciA
     (connectedToB,bGrounded) <- lift $ subgraph blockB
-    lift $ setLink linkKey $ Just $ LinkVal True
+    lift $ setLink linkKey $ Just $ OnLink force
     unless (cciA == cciB) $ do
         lift $ setCc cciA (aGrounded + bGrounded)
         lift $ pushCci cciB
@@ -221,16 +129,20 @@ renderBlock blockKey@(BlockKey (xi,yi)) = do
             color red $ Text $ show cci]
 
 renderLink :: Link -> Picture
-renderLink (L2R (xi,yi),LinkVal active) = color c $ scale scaleFactor scaleFactor $
+renderLink (L2R (xi,yi),linkVal) = color c $ scale scaleFactor scaleFactor $
     translate x y diamond
     where x = fromIntegral xi
           y = fromIntegral yi
-          c = if active then red else blue
-renderLink (D2U (xi,yi),LinkVal active) = color c $ scale scaleFactor scaleFactor $
+          c = case linkVal of
+              OffLink  -> blue
+              OnLink _ -> red  
+renderLink (D2U (xi,yi),linkVal) = color c $ scale scaleFactor scaleFactor $
     translate x y $ rotate (-90) diamond
     where x = fromIntegral xi
           y = fromIntegral yi
-          c = if active then red else blue
+          c = case linkVal of
+              OffLink  -> blue
+              OnLink _ -> red  
 
 diamond = translate 0.5 0 $ scale 0.8 0.8 $
           Polygon [(-l,0.5-l),(0,0.5),(l,0.5-l),
@@ -283,7 +195,7 @@ addBlock (blockKey @(BlockKey (x,y)),val) = do
         addLink (blockKey,linkKey) = do
             blocks <- getBlocks
             when (blockKey `H.member` blocks)$ 
-                setLink linkKey (Just $ LinkVal False) 
+                setLink linkKey (Just OffLink) 
 
 roundToIntPoint :: Point -> IntPt
 roundToIntPoint (x,y) = (round (x/scaleFactor), round (y/scaleFactor))
@@ -292,7 +204,9 @@ connectedNeighbors :: BlockKey -> State World [BlockKey]
 connectedNeighbors blockKey = do
     links <- getLinks
     return [blockKey|(blockKey,linkKey) <- possibleLinks blockKey,
-        Just (LinkVal True) == H.lookup linkKey links]
+        case H.lookup linkKey links of
+            Just (OnLink _) -> True
+            _ -> False]
 
 subgraph :: BlockKey -> State World (S.Set BlockKey,Int)
 subgraph blockKey = dfs [blockKey] (S.empty,0) where
@@ -311,3 +225,14 @@ subgraph blockKey = dfs [blockKey] (S.empty,0) where
             newGrounded <- (grounded +) <$> isBedrock x
             let acc = (S.insert x visited, newGrounded)
             dfs (new ++ xs) acc
+
+setForces :: State World ()
+setForces = do
+    blocks <- getBlocks
+    links <- getLinks
+    blockForces <- mapM (\ BlockVal _ cci -> (>0) <$> getCc cci) blocks
+    let forces = solveForces blockForces (H.keys links)
+    mapM_ (\ (linkKey,force) -> let
+        updateLink OffLink = OffLink
+        updateLink (OnLink _) = OnLink force
+        in adjustLink linkKey updateLink) $ H.toList forces
