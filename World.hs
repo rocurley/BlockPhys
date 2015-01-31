@@ -1,3 +1,4 @@
+
 module World
 ( IntPt
 , BlockType(..)
@@ -35,6 +36,7 @@ module World
 
 import qualified Data.Map as H
 import Control.Applicative
+-- import Control.Lens
 import Control.Monad.State.Strict hiding (mapM,mapM_)
 
 type IntPt = (Int,Int)
@@ -63,7 +65,9 @@ type CConVal = Int
 type CCon = (CConKey,CConVal)
 type CConMap = H.Map CConKey CConVal
 
-data World = World BlockMap LinkMap CConMap [Int]
+data World = World {_blocks :: BlockMap, _links :: LinkMap, _cCons :: CConMap, _cCis :: [Int]}
+
+-- makeLenses ''World
 
 getBlocks :: State World BlockMap
 getBlocks = do

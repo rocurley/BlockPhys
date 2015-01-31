@@ -1,7 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 
 module Physics
-( solveForces) where
+( solveForces
+, g) where
 
 import Prelude hiding (foldr,foldl,mapM,mapM_,sequence)
 import Numeric.Minimization.QuadProgPP
@@ -19,6 +20,7 @@ import Data.Monoid
 import Data.Foldable
 import Data.Maybe
 
+import Debug.Trace
 
 import World
 
@@ -68,18 +70,21 @@ expandForcesList (u:r:cc:rest) = Just (Force u r cc,rest)
 expandForcesList _ = Nothing
 
 solveForces :: H.Map BlockKey Force -> [LinkKey] -> H.Map LinkKey Force
-solveForces externalForces links = let
+solveForces externalForces links = trace "solveForces" $ let
     nBlocks    = H.size externalForces :: Int
     nLinks     = length links
     blocksList = H.keys externalForces :: [BlockKey]
     blockMap   = H.fromList $ zip blocksList [0..] :: H.Map BlockKey Int
     orderedForces = map (externalForces H.!)  blocksList
-    a = ident $ 3*nLinks
-    b = V.fromList $ replicate (3*nLinks) 0
-    c = M.fromColumns $ foldr (addLinkCols nBlocks blockMap) [] links
+    a = traceShowId $ ident $ 3*nLinks
+    b = traceShowId $ V.fromList $ replicate (3*nLinks) 0
+    c = traceShowId $ M.fromColumns $ foldr (addLinkCols nBlocks blockMap) [] links
     --A fold would do this without list concatenation
-    d = V.fromList $ join [[up, right, rotRight]|Force up right rotRight <- orderedForces]
-    Right (forcesVector, energy) = solveQuadProg (a,b) (Just (c,d)) Nothing
+    d = traceShowId $ V.fromList $ join [[up, right, rotRight]|Force up right rotRight <- orderedForces]
+    derp = traceShowId $ solveQuadProg (a,b) (Just (c,d)) Nothing
+    (forcesVector, energy) = case traceShowId $ solveQuadProg (a,b) (Just (c,d)) Nothing of
+        Right (f,e) -> (f,e)
+        Left err -> error $ show err
     in H.fromList $ zip links $ unfoldr expandForcesList (V.toList forcesVector)
 
 g = Force (-1) 0 0
@@ -92,8 +97,8 @@ instance Monoid Stress where
 -- |dFx/dx,dFx/dy|
 -- |dFy/dx,dFy/dy|
 
-stress :: H.Map LinkKey Force -> [(Direction,LinkKey)] -> Stress
-stress forces = fromMaybe mempty . foldMap stress' where
+stressFromLinks :: H.Map LinkKey Force -> [(Direction,LinkKey)] -> Stress
+stressFromLinks forces = fromMaybe mempty . foldMap stress' where
     stress'  :: (Direction, LinkKey) -> Maybe Stress
     stress' (direction, key) = do 
         Force up right rotCCW <- H.lookup key forces

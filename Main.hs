@@ -1,3 +1,6 @@
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE LambdaCase  #-}
+
 import Prelude hiding (foldr,foldl,mapM,mapM_,sequence)
 
 import Graphics.Gloss.Interface.Pure.Game
@@ -19,6 +22,8 @@ import Debug.Trace
 
 import qualified Data.Map as H
 import qualified Data.Set as S
+
+import Control.Lens
 
 import World
 import Physics
@@ -226,13 +231,33 @@ subgraph blockKey = dfs [blockKey] (S.empty,0) where
             let acc = (S.insert x visited, newGrounded)
             dfs (new ++ xs) acc
 
+linkGrounded :: LinkKey -> State World Bool
+linkGrounded key = do
+    maybeLinkVal <- lookupLink key
+    case maybeLinkVal of
+        Nothing -> return False
+        Just OffLink -> return False
+        Just _ -> do
+            let (blockKey,_) = linkedBlocks key
+            Just (BlockVal _ cci) <- lookupBlock blockKey
+            cc <- getCc cci
+            case cc of
+                Nothing -> error "cci not found"
+                Just 0  -> return False
+                _       -> return True
+
 setForces :: State World ()
 setForces = do
     blocks <- getBlocks
     links <- getLinks
-    blockForces <- mapM (\ BlockVal _ cci -> (>0) <$> getCc cci) blocks
-    let forces = solveForces blockForces (H.keys links)
+    blockGrounded <- traverse (\ (BlockVal blockType cci) ->
+        (blockType==Bedrock,) <$> (fromJust <$> getCc cci)) blocks
+    let blockForces = fmap (const g) $ H.filter (\ (isBedrock,nGroundings) -> not isBedrock && nGroundings > 0) blockGrounded
+    activeLinks <- filterM linkGrounded $ H.keys links
+    let forces = solveForces blockForces activeLinks
     mapM_ (\ (linkKey,force) -> let
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
         in adjustLink linkKey updateLink) $ H.toList forces
+    links <- getLinks
+    traceShow links $ return ()
