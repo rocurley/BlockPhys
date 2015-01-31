@@ -1,11 +1,11 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase  #-}
 
-import Prelude hiding (foldr,foldl,mapM,mapM_,sequence)
+import Prelude hiding (foldr,foldl,mapM,mapM_,sequence,concatMap)
 
 import Graphics.Gloss.Interface.Pure.Game
 
-import Data.List hiding (foldr,foldl,foldl')
+import Data.List hiding (foldr,foldl,foldl',concatMap)
 import Data.Monoid
 import Data.Foldable
 import Data.Fixed
@@ -178,11 +178,12 @@ inDiamond (x,y) = x'+y'<0.5 && x' < 0.2 && y' < 0.5
     where
         (x',y') = (abs $ (x-0.5)/0.8, abs $ y/0.8)
 
-possibleLinks :: BlockKey -> [(BlockKey,LinkKey)]
-possibleLinks (BlockKey (x,y)) = [(BlockKey (x+1,y),L2R (x  ,y  )),
-                                  (BlockKey (x-1,y),L2R (x-1,y  )),
-                                  (BlockKey (x,y-1),D2U (x  ,y-1)),
-                                  (BlockKey (x,y+1),D2U (x  ,y  ))]
+possibleLinks :: BlockKey -> H.Map Direction (BlockKey,LinkKey)
+possibleLinks (BlockKey (x,y)) = H.fromList 
+                                 [(RtDir, (BlockKey (x+1,y),L2R (x  ,y  ))),
+                                  (LfDir, (BlockKey (x-1,y),L2R (x-1,y  ))),
+                                  (DnDir, (BlockKey (x,y-1),D2U (x  ,y-1))),
+                                  (UpDir, (BlockKey (x,y+1),D2U (x  ,y  )))]
 
 removeBlock :: BlockKey -> State World Bool
 removeBlock blockKey = fmap isJust $ runMaybeT $ do
@@ -208,7 +209,7 @@ roundToIntPoint (x,y) = (round (x/scaleFactor), round (y/scaleFactor))
 connectedNeighbors :: BlockKey -> State World [BlockKey]
 connectedNeighbors blockKey = do
     links <- getLinks
-    return [blockKey|(blockKey,linkKey) <- possibleLinks blockKey,
+    return [blockKey|(blockKey,linkKey) <- H.elems $ possibleLinks blockKey,
         case H.lookup linkKey links of
             Just (OnLink _) -> True
             _ -> False]
@@ -259,5 +260,8 @@ setForces = do
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
         in adjustLink linkKey updateLink) $ H.toList forces
-    links <- getLinks
-    traceShow links $ return ()
+
+blockStress :: BlockKey -> State World Stress
+blockStress key = do
+    maybeLinkVals <- H.toList <$> traverse lookupLink (snd <$> possibleLinks key)
+    return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]

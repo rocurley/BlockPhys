@@ -16,6 +16,7 @@ module World
 , CCon(..)
 , CConMap(..)
 , World(..)
+, Direction(..)
 , force0
 , getBlocks
 , lookupBlock
@@ -59,6 +60,8 @@ type LinkMap  = H.Map LinkKey LinkVal
 
 data Force = Force {up :: Double, right :: Double, rotCCW :: Double} deriving (Eq,Ord,Show)
 force0 = Force 0 0 0
+
+data Direction = UpDir| DnDir | LfDir | RtDir deriving (Eq,Ord,Show)
 
 type CConKey = Int
 type CConVal = Int
