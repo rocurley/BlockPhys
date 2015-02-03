@@ -37,7 +37,6 @@ main = play displayMode white 60
 --TODO:
 
 --Make it possible to run the physics sim and display the output in some legible way
---Figure out a way to make the whole darn program not crash if there's no bedrock.
 --The block coordinate system uses integers, but falling pieces can be at
 --    intermediate positions.
 -- Needs a lens refactor
@@ -71,15 +70,15 @@ handleBlockClick key  = do
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
           cycleBlock (key,Nothing) = do
               cci <- popCci 0
-              addBlock (key,BlockVal Normal cci)
+              assign (blocks.at key) $ Just $ BlockVal Normal cci
           cycleBlock (key,Just (BlockVal Normal cci)) = do
-              adjustCc (+1) cci
-              setBlock key $ Just (BlockVal Bedrock cci)
-          cycleBlock (key,Just (BlockVal Bedrock cci)) = void $ removeBlock key
+              cCons.at cci %= fmap (+1)
+              assign (blocks.at key) $ Just $ BlockVal Bedrock cci
+          cycleBlock (key,Just (BlockVal Bedrock cci)) = assign (blocks.at key) Nothing
 
 handleLinkClick :: LinkKey -> State World ()
 handleLinkClick linkKey = do
-    link <- lookupLink linkKey
+    link <- use $ links.at linkKey
     case link of
         Just OffLink    -> linkOn linkKey force0
         Just (OnLink _) -> linkOff linkKey
@@ -88,39 +87,37 @@ handleLinkClick linkKey = do
 
 linkOff :: LinkKey -> State World Bool
 linkOff linkKey = fmap isJust $ runMaybeT $ do
-    linkVal <- MaybeT $ lookupLink linkKey
-    lift $ setLink linkKey $ Just OffLink
+    linkVal <- MaybeT $ use $ links.at linkKey
+    lift $ assign (links.at linkKey) $ Just OffLink
     let (blockA,blockB) = linkedBlocks linkKey
-    (BlockVal _ ccKeyA) <- MaybeT $ lookupBlock blockA
-    grounded <- MaybeT $ getCc ccKeyA
+    (BlockVal _ ccKeyA) <- MaybeT $ use $ blocks.at blockA
+    grounded <- MaybeT $ use $ cCons.at ccKeyA
     (connectedToB,bGrounded) <- lift $ subgraph blockB
     unless (S.member blockA connectedToB) $ do
-        lift $ adjustCc (subtract bGrounded) ccKeyA
-        cci <- lift $ popCci bGrounded
-        lift $ mapM_ (`alterBlock` (\ (Just (BlockVal ty _)) ->
-            Just $ BlockVal ty cci)) connectedToB
+        lift $ cCons.at ccKeyA %= fmap (subtract bGrounded)
+        cciB <- lift $ popCci bGrounded
+        lift $ blocks.atMulti connectedToB.cci.= cciB
 
 linkOn :: LinkKey -> Force -> State World Bool
 linkOn linkKey force = fmap isJust $ runMaybeT $ do
-    linkVal <- MaybeT $ lookupLink linkKey
+    linkVal <- MaybeT $ use $ links.at linkKey
     let (blockA,blockB) = linkedBlocks linkKey
-    BlockVal _ cciA <- MaybeT $ lookupBlock blockA 
-    BlockVal _ cciB <- MaybeT $ lookupBlock blockB
-    aGrounded <- MaybeT $ getCc cciA
+    BlockVal _ cciA <- MaybeT $ use $ blocks.at blockA 
+    BlockVal _ cciB <- MaybeT $ use $ blocks.at blockB
+    aGrounded <- MaybeT $ use $ cCons.at cciA
     (connectedToB,bGrounded) <- lift $ subgraph blockB
-    lift $ setLink linkKey $ Just $ OnLink force
+    lift $ assign (links.at linkKey) $ Just $ OnLink force
     unless (cciA == cciB) $ do
-        lift $ setCc cciA (aGrounded + bGrounded)
+        lift $ assign (cCons.at cciA) (aGrounded + bGrounded)
         lift $ pushCci cciB
-        lift $ mapM_ (`alterBlock` (\ ( Just (BlockVal ty _)) ->
-            Just $ BlockVal ty cciA)) connectedToB
+        lift $ blocks.atMulti connectedToB.cci.= cciA
 
 renderBlock :: BlockKey -> State World Picture
 renderBlock blockKey@(BlockKey (xi,yi)) = do
-    BlockVal blockType cci <- fromJust <$> lookupBlock blockKey
-    grounded <- fromJust <$> getCc cci
+    BlockVal blockType cci <- fromJust <$> use (blocks.at blockKey)
+    grounded <- (>0) <$> fromJust <$> use (cCis.at cci)
     let (x,y) = (fromIntegral xi, fromIntegral yi)
-    let c = case (blockType,grounded>0) of
+    let c = case (blockType,grounded) of
             (Normal,True)  -> greyN 0.3
             (Normal,False) -> greyN 0.6
             (Bedrock,_)    -> black
@@ -161,10 +158,10 @@ linkClickCheck (x,y) = let
     u = xrem + yrem -1
     v = yrem - xrem
     linkTester :: Point -> LinkKey -> State World (Maybe LinkKey)
-    linkTester (x,y) link = do
-        links <- getLinks
-        return $ if inDiamond (x,y) && H.member link links
-                 then Just link
+    linkTester (x,y) linkKey = do
+        linkVal <- use $ links.at linkKey
+        return $ if inDiamond (x,y) && isJust linkVal
+                 then Just linkKey
                  else Nothing
     in case (compare u 0,compare v 0) of
         (LT,LT) -> linkTester (xrem,yrem)$ L2R (xi,yi) 
@@ -188,29 +185,28 @@ possibleLinks (BlockKey (x,y)) = H.fromList
 removeBlock :: BlockKey -> State World Bool
 removeBlock blockKey = fmap isJust $ runMaybeT $ do
     lift $ mapM_ (linkOff . snd) $ possibleLinks blockKey
-    BlockVal _ cci <- MaybeT $ lookupBlock blockKey
-    lift $ mapM_ ((`setLink` Nothing) . snd ) $ possibleLinks blockKey
-    lift $ setBlock blockKey Nothing
+    BlockVal _ cci <- MaybeT $ use $ blocks.at blockKey
+    lift $ links.atMulti (snd <$> possibleLinks blockKey).= Nothing
+    lift blocks.at blockKey.= Nothing
     lift $ pushCci cci
 
 addBlock :: Block -> State World ()
 addBlock (blockKey @(BlockKey (x,y)),val) = do
-    setBlock blockKey $ Just val
-    mapM_ addLink $ possibleLinks blockKey
+    blocks.at blockKey.= Just val
+    traverse_ addLink $ possibleLinks blockKey
     where
         addLink (blockKey,linkKey) = do
-            blocks <- getBlocks
-            when (blockKey `H.member` blocks)$ 
-                setLink linkKey (Just OffLink) 
+            blockVal <- use $ blocks.at blockKey
+            when (isJust blockVal) $ links.at linkKey.= Just OffLink
 
 roundToIntPoint :: Point -> IntPt
 roundToIntPoint (x,y) = (round (x/scaleFactor), round (y/scaleFactor))
 
 connectedNeighbors :: BlockKey -> State World [BlockKey]
 connectedNeighbors blockKey = do
-    links <- getLinks
+    links' <- use links --TODO: MAKE THIS NOT DUMB
     return [blockKey|(blockKey,linkKey) <- H.elems $ possibleLinks blockKey,
-        case H.lookup linkKey links of
+        case H.lookup linkKey links' of
             Just (OnLink _) -> True
             _ -> False]
 
@@ -218,7 +214,7 @@ subgraph :: BlockKey -> State World (S.Set BlockKey,Int)
 subgraph blockKey = dfs [blockKey] (S.empty,0) where
     isBedrock :: BlockKey -> State World Int
     isBedrock blockKey = do
-        block <- lookupBlock blockKey
+        block <- use $ blocks.at blockKey
         case block of
             Just (BlockVal Bedrock _) -> return 1
             Just (BlockVal _ _) -> return 0 
@@ -234,14 +230,14 @@ subgraph blockKey = dfs [blockKey] (S.empty,0) where
 
 linkGrounded :: LinkKey -> State World Bool
 linkGrounded key = do
-    maybeLinkVal <- lookupLink key
+    maybeLinkVal <- use $ links.at key
     case maybeLinkVal of
         Nothing -> return False
         Just OffLink -> return False
         Just _ -> do
             let (blockKey,_) = linkedBlocks key
-            Just (BlockVal _ cci) <- lookupBlock blockKey
-            cc <- getCc cci
+            Just (BlockVal _ cci) <- use $ blocks.at blockKey
+            cc <- use $ cCons.at cci
             case cc of
                 Nothing -> error "cci not found"
                 Just 0  -> return False
@@ -249,19 +245,17 @@ linkGrounded key = do
 
 setForces :: State World ()
 setForces = do
-    blocks <- getBlocks
-    links <- getLinks
-    blockGrounded <- traverse (\ (BlockVal blockType cci) ->
-        (blockType==Bedrock,) <$> (fromJust <$> getCc cci)) blocks
-    let blockForces = fmap (const g) $ H.filter (\ (isBedrock,nGroundings) -> not isBedrock && nGroundings > 0) blockGrounded
-    activeLinks <- filterM linkGrounded $ H.keys links
+    blocksGrounded <- traverse (\ (BlockVal blockType cci) ->
+        (blockType==Bedrock,) <$> (fromJust <$> getCc cci)) =<< use blocks
+    let blockForces = const g <$> H.filter (\ (isBedrock,nGroundings) -> not isBedrock && nGroundings > 0) blocksGrounded
+    activeLinks <- filterM linkGrounded =<< (H.keys <$> use links)
     let forces = solveForces blockForces activeLinks
     mapM_ (\ (linkKey,force) -> let
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
-        in adjustLink linkKey updateLink) $ H.toList forces
+        in links.at linkKey%= updateLink) $ H.toList forces
 
 blockStress :: BlockKey -> State World Stress
 blockStress key = do
-    maybeLinkVals <- H.toList <$> traverse lookupLink (snd <$> possibleLinks key)
+    maybeLinkVals <- H.toList <$> traverse (\ key -> use (links.at key)) (snd <$> possibleLinks key)
     return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]

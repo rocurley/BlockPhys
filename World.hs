@@ -1,9 +1,13 @@
+{-# LANGUAGE TemplateHaskell #-}
 
 module World
 ( IntPt
 , BlockType(..)
 , BlockKey(..)
+, blockLoc
 , BlockVal(..)
+, blockType
+, cci
 , Block(..)
 , BlockMap(..)
 , LinkKey(..)
@@ -16,37 +20,33 @@ module World
 , CCon(..)
 , CConMap(..)
 , World(..)
+, blocks
+, links
+, cCons
+, cCis
 , Direction(..)
 , force0
-, getBlocks
-, lookupBlock
-, setBlock
-, alterBlock
-, getLinks
-, lookupLink
-, setLink
-, alterLink
-, adjustLink
 , popCci
 , pushCci
-, setCc
-, getCc
-, adjustCc
 , linkedBlocks
+, atMulti
 ) where
 
-import qualified Data.Map as H
+import qualified Data.Map as H hiding (Map)
+import Data.Map (Map)
 import Control.Applicative
--- import Control.Lens
+import Control.Lens
 import Control.Monad.State.Strict hiding (mapM,mapM_)
+import Data.Monoid
+import Data.Foldable
 
 type IntPt = (Int,Int)
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
-newtype BlockKey = BlockKey IntPt deriving (Eq,Ord,Show)
-data BlockVal = BlockVal BlockType Int deriving (Eq,Ord,Show)
+newtype BlockKey = BlockKey {_blockLoc :: IntPt} deriving (Eq,Ord,Show)
+data BlockVal = BlockVal {_blockType :: BlockType, _cci :: Int} deriving (Eq,Ord,Show)
 type Block = (BlockKey,BlockVal)
-type BlockMap = H.Map BlockKey BlockVal
+type BlockMap = Map BlockKey BlockVal
 
 --I don't like that this can represent invalid states, but the validitiy of a link is
 --pretty much tied to the global state, so I don't think it can be cromulently enforced
@@ -55,10 +55,10 @@ type BlockMap = H.Map BlockKey BlockVal
 data LinkKey = L2R IntPt | D2U IntPt deriving (Eq,Ord,Show)
 data LinkVal = OffLink | OnLink Force deriving (Eq,Ord,Show)
 type Link = (LinkKey,LinkVal)
-type LinkMap  = H.Map LinkKey LinkVal
+type LinkMap  = Map LinkKey LinkVal
 
 
-data Force = Force {up :: Double, right :: Double, rotCCW :: Double} deriving (Eq,Ord,Show)
+data Force = Force {_up :: Double, _right :: Double, _rotCCW :: Double} deriving (Eq,Ord,Show)
 force0 = Force 0 0 0
 
 data Direction = UpDir| DnDir | LfDir | RtDir deriving (Eq,Ord,Show)
@@ -66,11 +66,13 @@ data Direction = UpDir| DnDir | LfDir | RtDir deriving (Eq,Ord,Show)
 type CConKey = Int
 type CConVal = Int
 type CCon = (CConKey,CConVal)
-type CConMap = H.Map CConKey CConVal
+type CConMap = Map CConKey CConVal
 
 data World = World {_blocks :: BlockMap, _links :: LinkMap, _cCons :: CConMap, _cCis :: [Int]}
 
--- makeLenses ''World
+makeLenses ''World
+makeLenses ''BlockVal
+makeLenses ''BlockKey
 
 getBlocks :: State World BlockMap
 getBlocks = do
@@ -142,3 +144,16 @@ adjustCc f key = do
 linkedBlocks :: LinkKey -> (BlockKey,BlockKey)
 linkedBlocks (L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))
 linkedBlocks (D2U (x,y)) = (BlockKey (x,y), BlockKey (x,y+1))
+
+newtype AEndo a m = AEndo {appAEndo :: m (a -> a)}
+instance Applicative m => Monoid (AEndo a m) where
+        mempty = AEndo $ pure id
+        AEndo f `mappend` AEndo g = AEndo $ (.) <$> f <*> g
+
+atMulti :: (Applicative m,Foldable f,Ord k) => f k -> (Maybe v -> m (Maybe v)) -> Map k v -> m (Map k v)
+atMulti keys f mp = ($ mp) <$> appAEndo (foldMap (AEndo . alter) keys) where
+    alter k = mapSet k <$> f (H.lookup k mp)
+
+mapSet :: Ord k => k -> Maybe v -> Map k v -> Map k v
+mapSet k (Just v) = H.insert k v
+mapSet k Nothing = H.delete k
