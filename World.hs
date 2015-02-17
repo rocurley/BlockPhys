@@ -129,7 +129,7 @@ pushCci i = do
 setCc :: Int -> CConVal -> State World ()
 setCc i grounded = do
     World blocks links cCons is <- get
-    put $ World blocks links (H.insert i grounded cCons) $ is
+    put $ World blocks links (H.insert i grounded cCons) is
 
 getCc :: Int -> State World (Maybe CConVal)
 getCc i = do

@@ -1,5 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase  #-}
+{-# LANGUAGE DataKinds #-}
 
 import Prelude hiding (foldr,foldl,mapM,mapM_,sequence,concatMap)
 
@@ -23,6 +24,12 @@ import Debug.Trace
 import qualified Data.Map as H
 import qualified Data.Set as S
 
+import qualified Numeric.LinearAlgebra.HMatrix as LA
+import Numeric.LinearAlgebra.Static as SLA
+import qualified Data.Packed.Vector as V
+import GHC.Float
+
+
 import Control.Lens
 
 import World
@@ -36,10 +43,9 @@ main = play displayMode white 60
  
 --TODO:
 
---Make it possible to run the physics sim and display the output in some legible way
+--Refactor LinkKey so the direction is its own type, not encoded in the constructor.
 --The block coordinate system uses integers, but falling pieces can be at
 --    intermediate positions.
--- Needs a lens refactor
 
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 scaleFactor = 80
@@ -50,9 +56,10 @@ initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0))
 renderWorld :: World -> Picture
 renderWorld world@(World blocks links _ _)= Pictures [
     Pictures $ (`evalState` world) $ mapM renderBlock $ H.keys blocks,
-    Pictures $ map renderLink $ H.toList links,debug]
+    Pictures $ map renderLink $ H.toList links]
     where debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
+          stress = scale scaleFactor scaleFactor $ renderStress (Stress $ matrix [1,1,1,-2])
 
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
@@ -64,9 +71,15 @@ handleEvent _ = id
 
 handleBlockClick :: BlockKey -> State World ()
 handleBlockClick key  = do
-    world@(World blocks _ _ _) <- get
-    cycleBlock (key,H.lookup key blocks)
+    blockVal <- use $ blocks.at key
+    cycleBlock (key,blockVal)
     setForces
+    blockKeys <- use $ blocks.to H.keys
+    blockStresses <- traverse blockStress blockKeys
+    links' <- use links
+    traceShow links' $ return ()
+    traceShow (H.fromList $ zip blockKeys blockStresses) $ return ()
+
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
           cycleBlock (key,Nothing) = do
               cci <- popCci 0
@@ -99,7 +112,7 @@ linkOff linkKey = fmap isJust $ runMaybeT $ do
         lift $ blocks.atMulti connectedToB.traverse.cci.= cciB
 
 linkOn :: LinkKey -> Force -> State World Bool
-linkOn linkKey force = trace "linkOn" $ fmap isJust $ runMaybeT $ do
+linkOn linkKey force = fmap isJust $ runMaybeT $ do
     linkVal <- MaybeT $ use $ links.at linkKey
     let (blockA,blockB) = linkedBlocks linkKey
     BlockVal _ cciA <- MaybeT $ use $ blocks.at blockA 
@@ -115,20 +128,21 @@ linkOn linkKey force = trace "linkOn" $ fmap isJust $ runMaybeT $ do
 renderBlock :: BlockKey -> State World Picture
 renderBlock blockKey@(BlockKey (xi,yi)) = do
     BlockVal blockType cci <- fromJust <$> use (blocks.at blockKey)
+    stress <- blockStress blockKey
     grounded <- (>0) <$> fromJust <$> use (cCons.at cci)
     let (x,y) = (fromIntegral xi, fromIntegral yi)
     let c = case (blockType,grounded) of
             (Normal,True)  -> greyN 0.3
             (Normal,False) -> greyN 0.6
             (Bedrock,_)    -> black
+    let box = scale blockSize blockSize $ color c $
+                Polygon [(-0.5,-0.5),(0.5,-0.5),(0.5,0.5),(-0.5,0.5)]
+    let cciLabel = translate (-0.25) (-0.3) $
+                        scale (0.5/scaleFactor) (0.5/scaleFactor) $
+                        color red $ Text $ show cci
     return $ scale scaleFactor scaleFactor $
         translate x y $
-        Pictures [
-        scale blockSize blockSize $ 
-        color c $
-        Polygon [(-0.5,-0.5),(0.5,-0.5),(0.5,0.5),(-0.5,0.5)],
-        translate (-0.25) (-0.3) $ scale (0.5/scaleFactor) (0.5/scaleFactor) $
-            color red $ Text $ show cci]
+        Pictures [box, cciLabel, renderStress stress]
 
 renderLink :: Link -> Picture
 renderLink (L2R (xi,yi),linkVal) = color c $ scale scaleFactor scaleFactor $
@@ -184,7 +198,7 @@ possibleLinks (BlockKey (x,y)) = H.fromList
 
 removeBlock :: BlockKey -> State World Bool
 removeBlock blockKey = fmap isJust $ runMaybeT $ do
-    lift $ mapM_ (linkOff . snd) $ possibleLinks blockKey
+    lift $ traverse (linkOff . snd) $ possibleLinks blockKey
     BlockVal _ cci <- MaybeT $ use $ blocks.at blockKey
     lift $ links.atMulti (snd <$> possibleLinks blockKey).= Nothing
     lift $ blocks.at blockKey.= Nothing
@@ -237,24 +251,25 @@ linkGrounded key = do
         Just _ -> do
             let (blockKey,_) = linkedBlocks key
             Just (BlockVal _ cci) <- use $ blocks.at blockKey
-            cc <- use $ cCons.at cci
-            case cc of
+            uses (cCons.at cci) $ \case
                 Nothing -> error "cci not found"
-                Just 0  -> return False
-                _       -> return True
+                Just 0  -> False
+                _       -> True
 
 setForces :: State World ()
 setForces = do
-    blocks' <- use blocks
     blocksGrounded <- traverse (
         \ (BlockVal blockType cci) -> do
             Just cc <- use $ cCons.at cci 
             return (blockType==Bedrock,cc)
-        ) blocks'
-    let blockForces = const g <$> H.filter (\ (isBedrock,nGroundings) -> not isBedrock && nGroundings > 0) blocksGrounded
+        ) =<< use blocks
+    let blockForces = const g <$> H.filter (
+            \ (isBedrock,nGroundings) ->
+                not isBedrock && nGroundings > 0
+            )blocksGrounded
     activeLinks <- filterM linkGrounded =<< (H.keys <$> use links)
     let forces = solveForces blockForces activeLinks
-    mapM_ (\ (linkKey,force) -> let
+    traverse_ (\ (linkKey,force) -> let
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
         in links.at linkKey%= fmap updateLink) $ H.toList forces
@@ -263,3 +278,36 @@ blockStress :: BlockKey -> State World Stress
 blockStress key = do
     maybeLinkVals <- H.toList <$> traverse (\ key -> use (links.at key)) (snd <$> possibleLinks key)
     return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]
+
+vector2Point :: R 2 -> Point
+vector2Point = (\ [x,y] -> (double2Float x,double2Float y)) . V.toList . SLA.extract
+
+drawArrow :: R 2 -> R 2 -> Float -> Picture
+drawArrow u v width' = scale (1/4) (1/4) $ Pictures [box,triangle]
+    where
+        width = vector [float2Double width',float2Double width'] :: R 2
+        diffsToPolygon :: R 2 -> [R 2] -> Picture
+        diffsToPolygon start = Polygon . map vector2Point . scanl (+) start
+        box = diffsToPolygon (u/2+(width/2)*v)
+            ([ (3/5)*u,
+              (-width)*v,
+              (-3/5)*u] :: [R 2])
+        triangle = diffsToPolygon (u/2+width*v+(3/5)*u)
+            ([ (2/5)*u - width*v,
+              (-2/5)*u -width*v] :: [R 2])
+
+renderStress :: Stress -> Picture
+renderStress  (Stress stressMatrix) = let
+    (eigenValues,eigenVectors) = SLA.eigensystem $ sym stressMatrix
+    [u,v] = SLA.toColumns eigenVectors
+    [lu,lv] = LA.toList $ SLA.extract eigenValues
+    renderStressComp :: Double -> R 2 -> R 2 -> Picture
+    renderStressComp mag u v = let
+        baseArrow = drawArrow u v $ double2Float (mag/4)
+        (x,y) = vector2Point u
+        arrow = case compare mag 0 of
+            GT -> Translate (x/8) (y/8) baseArrow
+            EQ -> Blank
+            LT -> Translate (-x*(1/4+1/8)) (-y*(1/4+1/8)) baseArrow
+        in Pictures [arrow, Rotate 180 arrow]
+    in Pictures [renderStressComp lu u v,renderStressComp lv v u]

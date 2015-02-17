@@ -7,13 +7,18 @@ module Physics
 , stressFromLinks) where
 
 import Prelude hiding (foldr,foldl,mapM,mapM_,sequence)
+
+import Graphics.Gloss.Interface.Pure.Game
+
 import Numeric.Minimization.QuadProgPP
 import qualified Data.Packed.Matrix as M
 import qualified Data.Map as H
 import Data.Packed.Matrix ((><))
 import qualified Data.Packed.Vector as V
-import qualified Numeric.LinearAlgebra as La
-import Numeric.LinearAlgebra.Static
+import qualified Numeric.LinearAlgebra.HMatrix as LA
+import GHC.TypeLits
+import Numeric.LinearAlgebra.Static as SLA
+
 import qualified Data.Set as S
 import Data.List hiding (foldr,foldl,foldl')
 import Data.Traversable
@@ -28,7 +33,7 @@ import World
 
 ident n = (n><n) $ cycle $ 1: replicate n 0
 
-linkColBuilder :: LinkKey -> (H.Map BlockKey Int) -> Int -> (Double, Double, Double)
+linkColBuilder :: LinkKey -> H.Map BlockKey Int -> Int -> (Double, Double, Double)
 --Given a link, the block map, and a given block index, gives as a tuple
 --the force that will be applied to that block.
 linkColBuilder linkKey @(L2R _) blockMap n
@@ -102,8 +107,14 @@ stressFromLinks = foldMap toStress where
     toStress (_, OffLink) = mempty
     toStress (direction, OnLink (Force up right rotCCW)) =
         let (upMat,rightMat,rotCCWMat) = case direction of 
-                UpDir -> (matrix [0,0,0,1],matrix [0,1,0,0],matrix [0,0,1,0])
-                DnDir -> (matrix [0,0,0,1],matrix [0,1,0,0],matrix [0,0,-1,0])
-                RtDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,1,0,0])
-                LfDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,-1,0,0])
+                UpDir -> (matrix [0,0,0,1],matrix [0,1,0,0],matrix [0,1,0,0])
+                DnDir -> (matrix [0,0,0,1],matrix [0,1,0,0],matrix [0,-1,0,0])
+                RtDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,-1,0])
+                LfDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,1,0])
             in Stress $ konst up*upMat+konst right*rightMat+konst rotCCW*rotCCWMat
+
+displayStress :: Stress -> Picture
+displayStress (Stress stressMatrix) = let
+    (eigenValues,eigenVectors) = SLA.eigensystem $ sym stressMatrix
+    eigenPairs = zip (LA.toList $ SLA.extract eigenValues) (SLA.toColumns eigenVectors) :: [(Double,R 2)]
+    in undefined
