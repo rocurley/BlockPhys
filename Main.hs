@@ -29,7 +29,6 @@ import Numeric.LinearAlgebra.Static as SLA
 import qualified Data.Packed.Vector as V
 import GHC.Float
 
-
 import Control.Lens
 
 import World
@@ -43,7 +42,8 @@ main = play displayMode white 60
  
 --TODO:
 
---Refactor LinkKey so the direction is its own type, not encoded in the constructor.
+--There's a bug in the block connection code.
+--Need to reset stress to 0 when a group is ungrounded.
 --The block coordinate system uses integers, but falling pieces can be at
 --    intermediate positions.
 
@@ -54,13 +54,21 @@ initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..]
 
 renderWorld :: World -> Picture
-renderWorld world@(World blocks links _ _)= Pictures [
-    Pictures $ (`evalState` world) $ mapM renderBlock $ H.keys blocks,
-    Pictures $ map renderLink $ H.toList links]
-    where debug = scale scaleFactor scaleFactor $ Pictures
+renderWorld world@(World blocks links _ _)= let
+    blockPictures = Pictures $ (`evalState` world) $ mapM renderBlock $ H.keys blocks
+    stressPictures = Pictures $ (`evalState` world) $ mapM renderBlockStress $ H.keys blocks
+    linkPictures = Pictures $ map renderLink $ H.toList links
+    debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
-          stress = scale scaleFactor scaleFactor $ renderStress (Stress $ matrix [1,1,1,-2])
-
+    testTrajectory = Parabola (-1,-1) (1,1) (-1)
+    trajectoryPicture = renderTrajectory 280 280 testTrajectory
+    playerCollision = (`evalState` world) $ predictCollision testTrajectory 5
+    grid = Scale scaleFactor scaleFactor $ Pictures $
+        [Line [(x,-3),(x,3)]|x<-[-3..3]] ++ [Line [(-3,y),(3,y)]|y<-[-3..3]]
+    in Pictures $ [grid,blockPictures,linkPictures,stressPictures,trajectoryPicture] ++
+        case playerCollision of
+            Nothing -> [] 
+            Just (Collision (x,y) t collidedBlock) -> [renderPlayer (x,y)]
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
     linkClicked <- linkClickCheck pt
@@ -74,11 +82,11 @@ handleBlockClick key  = do
     blockVal <- use $ blocks.at key
     cycleBlock (key,blockVal)
     setForces
-    blockKeys <- use $ blocks.to H.keys
-    blockStresses <- traverse blockStress blockKeys
-    links' <- use links
-    traceShow links' $ return ()
-    traceShow (H.fromList $ zip blockKeys blockStresses) $ return ()
+    --blockKeys <- use $ blocks.to H.keys
+    --blockStresses <- traverse blockStress blockKeys
+    --links' <- use links
+    --traceShow links' $ return ()
+    --traceShow (H.fromList $ zip blockKeys blockStresses) $ return ()
 
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
           cycleBlock (key,Nothing) = do
@@ -128,7 +136,6 @@ linkOn linkKey force = fmap isJust $ runMaybeT $ do
 renderBlock :: BlockKey -> State World Picture
 renderBlock blockKey@(BlockKey (xi,yi)) = do
     BlockVal blockType cci <- fromJust <$> use (blocks.at blockKey)
-    stress <- blockStress blockKey
     grounded <- (>0) <$> fromJust <$> use (cCons.at cci)
     let (x,y) = (fromIntegral xi, fromIntegral yi)
     let c = case (blockType,grounded) of
@@ -142,23 +149,30 @@ renderBlock blockKey@(BlockKey (xi,yi)) = do
                         color red $ Text $ show cci
     return $ scale scaleFactor scaleFactor $
         translate x y $
-        Pictures [box, cciLabel, renderStress stress]
+        Pictures [box]
+
+renderBlockStress :: BlockKey -> State World Picture
+renderBlockStress blockKey@(BlockKey (xi,yi)) = do
+    blockVal <- use $ blocks.at blockKey
+    case blockVal of
+        Nothing -> error "Trying to render an invalid blockKey"
+        Just (BlockVal Bedrock _) -> return Blank
+        _ -> do
+            stress <- blockStress blockKey
+            let (x,y) = (fromIntegral xi, fromIntegral yi)
+            return $ scale scaleFactor scaleFactor $ translate x y $ renderStress stress
 
 renderLink :: Link -> Picture
-renderLink (L2R (xi,yi),linkVal) = color c $ scale scaleFactor scaleFactor $
-    translate x y diamond
+renderLink (Link linkDirection (xi,yi),linkVal) = color c $
+    scale scaleFactor scaleFactor $ translate x y d
     where x = fromIntegral xi
           y = fromIntegral yi
           c = case linkVal of
-              OffLink  -> blue
-              OnLink _ -> red  
-renderLink (D2U (xi,yi),linkVal) = color c $ scale scaleFactor scaleFactor $
-    translate x y $ rotate (-90) diamond
-    where x = fromIntegral xi
-          y = fromIntegral yi
-          c = case linkVal of
-              OffLink  -> blue
-              OnLink _ -> red  
+              OffLink  -> makeColor 1 0 0 0.3
+              OnLink _ -> red
+          d = case linkDirection of
+              L2R -> diamond
+              D2U -> rotate (-90) diamond
 
 diamond = translate 0.5 0 $ scale 0.8 0.8 $
           Polygon [(-l,0.5-l),(0,0.5),(l,0.5-l),
@@ -178,10 +192,10 @@ linkClickCheck (x,y) = let
                  then Just linkKey
                  else Nothing
     in case (compare u 0,compare v 0) of
-        (LT,LT) -> linkTester (xrem,yrem)$ L2R (xi,yi) 
-        (LT,GT) -> linkTester (yrem,xrem) $ D2U (xi,yi) 
-        (GT,LT) -> linkTester (yrem,1-xrem)  $ D2U (xi+1,yi) 
-        (GT,GT) -> linkTester (xrem,1-yrem) $ L2R (xi,yi+1) 
+        (LT,LT) -> linkTester (xrem,yrem)   $ Link L2R (xi,yi) 
+        (LT,GT) -> linkTester (yrem,xrem)   $ Link D2U (xi,yi) 
+        (GT,LT) -> linkTester (yrem,1-xrem) $ Link D2U (xi+1,yi) 
+        (GT,GT) -> linkTester (xrem,1-yrem) $ Link L2R (xi,yi+1) 
         _ -> return Nothing -- Nothing on the boundary
 
 inDiamond :: Point -> Bool
@@ -191,10 +205,10 @@ inDiamond (x,y) = x'+y'<0.5 && x' < 0.2 && y' < 0.5
 
 possibleLinks :: BlockKey -> H.Map Direction (BlockKey,LinkKey)
 possibleLinks (BlockKey (x,y)) = H.fromList 
-                                 [(RtDir, (BlockKey (x+1,y),L2R (x  ,y  ))),
-                                  (LfDir, (BlockKey (x-1,y),L2R (x-1,y  ))),
-                                  (DnDir, (BlockKey (x,y-1),D2U (x  ,y-1))),
-                                  (UpDir, (BlockKey (x,y+1),D2U (x  ,y  )))]
+                                 [(RtDir, (BlockKey (x+1,y),Link L2R (x  ,y  ))),
+                                  (LfDir, (BlockKey (x-1,y),Link L2R (x-1,y  ))),
+                                  (DnDir, (BlockKey (x,y-1),Link D2U (x  ,y-1))),
+                                  (UpDir, (BlockKey (x,y+1),Link D2U (x  ,y  )))]
 
 removeBlock :: BlockKey -> State World Bool
 removeBlock blockKey = fmap isJust $ runMaybeT $ do
@@ -311,3 +325,24 @@ renderStress  (Stress stressMatrix) = let
             LT -> Translate (-x*(1/4+1/8)) (-y*(1/4+1/8)) baseArrow
         in Pictures [arrow, Rotate 180 arrow]
     in Pictures [renderStressComp lu u v,renderStressComp lv v u]
+
+renderTrajectory :: Float -> Float -> Trajectory -> Picture
+
+renderTrajectory xLim yLim trajectory@(Parabola (x0,y0) (vx,vy) ay) =
+    case (compare vx 0,compare ay 0, compare vy 0) of
+        (LT,_,_) -> Line [(x,yOfX x)|x<-[-xLim..x0f]]
+        (GT,_,_) -> Line [(x,yOfX x)|x<-[x0f..xLim]]
+        (EQ,LT,_) -> Line [(x0f,yPeak),(x0f,-yLim)] 
+        (EQ,GT,_) -> Line [(x0f,yPeak),(x0f,yLim)] 
+        (EQ,EQ,LT) -> Line [(x0f,y0f),(x0f,-yLim)] 
+        (EQ,EQ,GT) -> Line [(x0f,y0f),(x0f,yLim)] 
+        (EQ,EQ,EQ) -> Blank
+    where
+        x0f = x0*scaleFactor
+        y0f = y0*scaleFactor
+        tPeak = -vy/ay
+        yPeak = scaleFactor * snd (atT trajectory tPeak)
+        yOfX x = scaleFactor * snd (atT trajectory $ (x/scaleFactor-x0)/vx)
+renderPlayer :: Point -> Picture
+renderPlayer (x,y) = Scale scaleFactor scaleFactor $ Translate x y $
+    Polygon [(0.2,0.4),(-0.2,0.4),(-0.2,-0.4),(0.2,-0.4)]

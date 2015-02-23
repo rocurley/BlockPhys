@@ -11,6 +11,7 @@ module World
 , Block(..)
 , BlockMap(..)
 , LinkKey(..)
+, LinkDir(..)
 , LinkVal(..)
 , Link(..)
 , LinkMap(..)
@@ -52,7 +53,8 @@ type BlockMap = Map BlockKey BlockVal
 --pretty much tied to the global state, so I don't think it can be cromulently enforced
 --by the type system. (Why haven't you learned Agda again?)
 
-data LinkKey = L2R IntPt | D2U IntPt deriving (Eq,Ord,Show)
+data LinkKey = Link LinkDir IntPt deriving (Eq,Ord,Show)
+data LinkDir = L2R | D2U deriving (Eq,Ord,Show)
 data LinkVal = OffLink | OnLink Force deriving (Eq,Ord,Show)
 type Link = (LinkKey,LinkVal)
 type LinkMap  = Map LinkKey LinkVal
@@ -142,8 +144,8 @@ adjustCc f key = do
     put $ World blocks links (H.adjust f key cCons) is
 
 linkedBlocks :: LinkKey -> (BlockKey,BlockKey)
-linkedBlocks (L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))
-linkedBlocks (D2U (x,y)) = (BlockKey (x,y), BlockKey (x,y+1))
+linkedBlocks (Link L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))
+linkedBlocks (Link D2U (x,y)) = (BlockKey (x,y), BlockKey (x,y+1))
 
 newtype AEndo a m = AEndo {appAEndo :: m (a -> a)}
 instance Applicative m => Monoid (AEndo a m) where
