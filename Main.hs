@@ -38,7 +38,7 @@ main = play displayMode white 60
     initialWorld
     renderWorld
     handleEvent
-    (const id)
+    stepWorld
  
 --TODO:
 
@@ -53,8 +53,11 @@ blockSize = 0.95
 initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..]
 
+stepWorld :: Time -> World -> World
+    
+
 renderWorld :: World -> Picture
-renderWorld world@(World blocks links _ _)= let
+renderWorld world@(World blocks links _ _ player)= let
     blockPictures = Pictures $ (`evalState` world) $ mapM renderBlock $ H.keys blocks
     stressPictures = Pictures $ (`evalState` world) $ mapM renderBlockStress $ H.keys blocks
     linkPictures = Pictures $ map renderLink $ H.toList links
@@ -68,7 +71,13 @@ renderWorld world@(World blocks links _ _)= let
     in Pictures $ [grid,blockPictures,linkPictures,stressPictures,trajectoryPicture] ++
         case playerCollision of
             Nothing -> [] 
-            Just (Collision (x,y) t collidedBlock) -> [renderPlayer (x,y)]
+            Just (Collision (x,y) t (BlockKey (xi,yi)) direction) -> let
+                linkPicture = case direction of
+                    UpDir -> renderLink (Link D2U (xi,yi),OffLink)
+                    DnDir -> renderLink (Link D2U (xi,yi-1),OffLink)
+                    LfDir -> renderLink (Link L2R (xi-1,yi),OffLink)
+                    RtDir -> renderLink (Link L2R (xi,yi),OffLink)
+                in [renderPlayer (x,y),linkPicture]
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
     linkClicked <- linkClickCheck pt

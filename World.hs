@@ -1,7 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module World
-( IntPt
+( Velocity
+, Velocity(..)
+, IntPt
 , BlockType(..)
 , BlockKey(..)
 , blockLoc
@@ -20,7 +22,11 @@ module World
 , CConVal(..)
 , CCon(..)
 , CConMap(..)
+, Player(..)
+, JumpStatus(..)
 , World(..)
+, playerWidth
+, playerHeight
 , blocks
 , links
 , cCons
@@ -43,6 +49,9 @@ import Data.Foldable
 
 type IntPt = (Int,Int)
 
+type Velocity = (Float,Float)
+data Trajectory = Parabola Point Velocity Float deriving (Show,Eq,Ord)
+
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 newtype BlockKey = BlockKey {_blockLoc :: IntPt} deriving (Eq,Ord,Show)
 data BlockVal = BlockVal {_blockType :: BlockType, _cci :: Int} deriving (Eq,Ord,Show)
@@ -51,7 +60,7 @@ type BlockMap = Map BlockKey BlockVal
 
 --I don't like that this can represent invalid states, but the validitiy of a link is
 --pretty much tied to the global state, so I don't think it can be cromulently enforced
---by the type system. (Why haven't you learned Agda again?)
+--by the type system.
 
 data LinkKey = Link LinkDir IntPt deriving (Eq,Ord,Show)
 data LinkDir = L2R | D2U deriving (Eq,Ord,Show)
@@ -70,11 +79,23 @@ type CConVal = Int
 type CCon = (CConKey,CConVal)
 type CConMap = Map CConKey CConVal
 
-data World = World {_blocks :: BlockMap, _links :: LinkMap, _cCons :: CConMap, _cCis :: [Int]}
+data Player = Player {_playerLoc :: Point,_playerVel :: Velocity, _jumpStatus :: JumpStatus} 
+
+data JumpStatus :: Standing BlockKey | Jumping Float | Falling | NewlyFalling Float
+
+data World = World {_blocks :: BlockMap,
+                    _links :: LinkMap,
+                    _cCons :: CConMap,
+                    _cCis :: [Int]
+                    _player :: Player}
 
 makeLenses ''World
 makeLenses ''BlockVal
 makeLenses ''BlockKey
+makeLenses ''Player
+
+playerWidth = 0.4
+playerHeight = 0.8
 
 getBlocks :: State World BlockMap
 getBlocks = do

@@ -129,8 +129,7 @@ displayStress (Stress stressMatrix) = let
     in undefined
 
 type Time = Float
-data Trajectory = Parabola Point (Float,Float) Float deriving (Show,Eq,Ord)
-data Collision  = Collision Point Time BlockKey deriving (Show,Eq,Ord)
+data Collision  = Collision Point Time BlockKey Direction deriving (Show,Eq,Ord)
 
 atT :: Trajectory -> Time -> Point
 atT (Parabola (x,y) (vx,vy) ay) t =
@@ -175,14 +174,17 @@ predictCollision trajectory@(Parabola (x,y) (vx,vy) ay) dt = do
     let collisions = do --List monad
             block@(BlockKey (xBlockInt,yBlockInt)) <- blocksInBox
             let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
-            pm <- [(+),(-)]
-            (collisions,collisionChecker) <- [
-                (xint (yBlock `pm` ((h+1)/2)) trajectory,
-                    \ collisionX _ -> abs(xBlock-collisionX) < (w+1)/2),
-                (yint (xBlock `pm` ((w+1)/2)) trajectory,
-                    \ _ collisionY -> abs(yBlock-collisionY) < (h+1)/2)]
+            (collisions,collisionChecker,direction) <- [
+                (xint (yBlock + ((h+1)/2)) trajectory,
+                    \ collisionX _ -> abs(xBlock-collisionX) < (w+1)/2, UpDir),
+                (xint (yBlock - ((h+1)/2)) trajectory,
+                    \ collisionX _ -> abs(xBlock-collisionX) < (w+1)/2, DnDir),
+                (yint (xBlock + ((w+1)/2)) trajectory,
+                    \ _ collisionY -> abs(yBlock-collisionY) < (h+1)/2, RtDir),
+                (yint (xBlock - ((w+1)/2)) trajectory,
+                    \ _ collisionY -> abs(yBlock-collisionY) < (h+1)/2, LfDir)]
             ((collisionX,collisionY),collisionT) <- traceShowId $ collisions
-            if collisionChecker collisionX collisionY && collisionT >0
-            then [Collision (collisionX,collisionY) collisionT block]
+            if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
+            then [Collision (collisionX,collisionY) collisionT block direction]
             else []
-    return $ minimumByMay (comparing (\ (Collision _ t _) -> t)) collisions
+    return $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) collisions
