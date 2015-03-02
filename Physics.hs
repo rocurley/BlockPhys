@@ -4,6 +4,7 @@ module Physics
 ( solveForces
 , g
 , Stress(..)
+, Time
 , stressFromLinks
 , Trajectory(..)
 , Collision(..)
@@ -167,22 +168,22 @@ trajectoryBox (Parabola (x,y) (vx,vy) ay) dt = let
 predictCollision :: Trajectory -> Float -> State World (Maybe Collision)
 predictCollision trajectory@(Parabola (x,y) (vx,vy) ay) dt = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
-    let (w,h) = (0.4,0.8)
-    let blockCandidates = [BlockKey (x,y)|x<-[ceiling (xmin-(w+1)/2)..floor (xmax+(w+1)/2)],
-                                          y<-[ceiling (ymin-(h+1)/2)..floor (ymax+(h+1)/2)]]
+    let (xTouchDist,yTouchDist) = ((playerWidth+1)/2,(playerHeight+1)/2)
+    let blockCandidates = [BlockKey (x,y)|x<-[ceiling (xmin-xTouchDist)..floor (xmax+xTouchDist)],
+                                          y<-[ceiling (ymin-yTouchDist)..floor (ymax+yTouchDist)]]
     blocksInBox <- filterM (\ block -> use $ blocks.to (H.member block)) blockCandidates
     let collisions = do --List monad
             block@(BlockKey (xBlockInt,yBlockInt)) <- blocksInBox
             let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
             (collisions,collisionChecker,direction) <- [
-                (xint (yBlock + ((h+1)/2)) trajectory,
-                    \ collisionX _ -> abs(xBlock-collisionX) < (w+1)/2, UpDir),
-                (xint (yBlock - ((h+1)/2)) trajectory,
-                    \ collisionX _ -> abs(xBlock-collisionX) < (w+1)/2, DnDir),
-                (yint (xBlock + ((w+1)/2)) trajectory,
-                    \ _ collisionY -> abs(yBlock-collisionY) < (h+1)/2, RtDir),
-                (yint (xBlock - ((w+1)/2)) trajectory,
-                    \ _ collisionY -> abs(yBlock-collisionY) < (h+1)/2, LfDir)]
+                (xint (yBlock + yTouchDist) trajectory,
+                    \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, UpDir),
+                (xint (yBlock - yTouchDist) trajectory,
+                    \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, DnDir),
+                (yint (xBlock + xTouchDist) trajectory,
+                    \ _ collisionY -> abs(yBlock-collisionY) < xTouchDist, RtDir),
+                (yint (xBlock - xTouchDist) trajectory,
+                    \ _ collisionY -> abs(yBlock-collisionY) < xTouchDist, LfDir)]
             ((collisionX,collisionY),collisionT) <- traceShowId $ collisions
             if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
             then [Collision (collisionX,collisionY) collisionT block direction]

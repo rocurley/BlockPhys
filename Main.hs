@@ -46,15 +46,34 @@ main = play displayMode white 60
 --Need to reset stress to 0 when a group is ungrounded.
 --The block coordinate system uses integers, but falling pieces can be at
 --    intermediate positions.
+--Need to establish exactly what our units are.
 
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 scaleFactor = 80
 blockSize = 0.95
+initialPlayer = undefined
 initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0))
-    H.empty (H.singleton 0 1) [1..]
+    H.empty (H.singleton 0 1) [1..] initialPlayer
+
 
 stepWorld :: Time -> World -> World
-    
+stepWorld dt = execState (stepWorld' dt)
+
+stepWorld' :: Time -> State World ()
+stepWorld' dt = do
+    Player pos vel jumpStatus <- use player
+    case jumpStatus of
+        Standing blockKey -> undefined
+            --Check if you're going to run off the block
+            --If you do, either support you with a new block or transition to falling
+        Jumping upAccel -> undefined
+            --Decrease the upward acceleration, but keep accelerating up
+            --CrapCrapCrap I made this cubic
+        Falling -> undefined
+            --Check for collisions
+        NewlyFalling timeLeft -> undefined
+            --Permit jumping in this state, but otherwise fall.
+
 
 renderWorld :: World -> Picture
 renderWorld world@(World blocks links _ _ player)= let

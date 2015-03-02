@@ -1,8 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module World
-( Velocity
-, Velocity(..)
+( Velocity(..)
+, Trajectory(..)
 , IntPt
 , BlockType(..)
 , BlockKey(..)
@@ -31,6 +31,7 @@ module World
 , links
 , cCons
 , cCis
+, player
 , Direction(..)
 , force0
 , popCci
@@ -38,6 +39,8 @@ module World
 , linkedBlocks
 , atMulti
 ) where
+
+import Graphics.Gloss.Interface.Pure.Game
 
 import qualified Data.Map as H hiding (Map)
 import Data.Map (Map)
@@ -50,6 +53,7 @@ import Data.Foldable
 type IntPt = (Int,Int)
 
 type Velocity = (Float,Float)
+
 data Trajectory = Parabola Point Velocity Float deriving (Show,Eq,Ord)
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
@@ -81,12 +85,12 @@ type CConMap = Map CConKey CConVal
 
 data Player = Player {_playerLoc :: Point,_playerVel :: Velocity, _jumpStatus :: JumpStatus} 
 
-data JumpStatus :: Standing BlockKey | Jumping Float | Falling | NewlyFalling Float
+data JumpStatus = Standing BlockKey | Jumping Float | Falling | NewlyFalling Float
 
 data World = World {_blocks :: BlockMap,
                     _links :: LinkMap,
                     _cCons :: CConMap,
-                    _cCis :: [Int]
+                    _cCis :: [Int],
                     _player :: Player}
 
 makeLenses ''World
@@ -94,75 +98,17 @@ makeLenses ''BlockVal
 makeLenses ''BlockKey
 makeLenses ''Player
 
-playerWidth = 0.4
-playerHeight = 0.8
-
-getBlocks :: State World BlockMap
-getBlocks = do
-    World blocks _ _ _ <- get
-    return blocks
-
-lookupBlock :: BlockKey -> State World (Maybe BlockVal)
-lookupBlock blockKey = H.lookup blockKey <$> getBlocks
-
-setBlock :: BlockKey -> Maybe BlockVal -> State World ()
-setBlock blockKey blockVal = do
-    World blocks links cCons cci <- get
-    put $ World (H.alter (const blockVal) blockKey blocks) links cCons cci 
-
-alterBlock :: BlockKey -> (Maybe BlockVal -> Maybe BlockVal) -> State World ()
-alterBlock blockKey f = do
-    World blocks links cCons cci <- get
-    put $ World (H.alter f blockKey blocks) links cCons cci 
-
-getLinks :: State World LinkMap
-getLinks = do
-    World _ links _ _ <- get
-    return links
-
-lookupLink :: LinkKey -> State World (Maybe LinkVal)
-lookupLink linkKey = H.lookup linkKey <$> getLinks
-
-setLink :: LinkKey -> Maybe LinkVal -> State World ()
-setLink linkKey linkVal = do
-    World blocks links cCons cci <- get
-    put $ World blocks(H.alter (const linkVal) linkKey links) cCons cci 
-
-alterLink :: LinkKey -> (Maybe LinkVal -> Maybe LinkVal) -> State World ()
-alterLink linkKey f = do
-    World blocks links cCons cci <- get
-    put $ World blocks (H.alter f linkKey links) cCons cci 
-
-adjustLink :: LinkKey -> (LinkVal -> LinkVal) -> State World ()
-adjustLink linkKey f = do
-    World blocks links cCons cci <- get
-    put $ World blocks (H.adjust f linkKey links) cCons cci 
+playerWidth = 0.4 :: Float
+playerHeight = 0.8 :: Float
 
 popCci :: CConVal -> State World Int
 popCci grounded = do
-    World blocks links cCons (i:is) <- get
-    put $ World blocks links (H.insert i grounded cCons) is
+    i:is <- use cCis
+    cCis.=is
     return i
 
 pushCci :: Int -> State World ()
-pushCci i = do
-    World blocks links cCons is <- get
-    put $ World blocks links (H.delete i cCons) $ i:is
-
-setCc :: Int -> CConVal -> State World ()
-setCc i grounded = do
-    World blocks links cCons is <- get
-    put $ World blocks links (H.insert i grounded cCons) is
-
-getCc :: Int -> State World (Maybe CConVal)
-getCc i = do
-    World _ _ cCons _ <- get
-    return $ H.lookup i cCons
-
-adjustCc :: (CConVal -> CConVal) -> CConKey -> State World ()
-adjustCc f key = do
-    World blocks links cCons is <- get
-    put $ World blocks links (H.adjust f key cCons) is
+pushCci i = cCis%=(i:)
 
 linkedBlocks :: LinkKey -> (BlockKey,BlockKey)
 linkedBlocks (Link L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))
