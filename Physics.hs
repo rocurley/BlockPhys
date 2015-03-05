@@ -211,9 +211,9 @@ predictCollision trajectory dt = do
                 (xint (yBlock - yTouchDist) trajectory,
                     \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, DnDir),
                 (yint (xBlock + xTouchDist) trajectory,
-                    \ _ collisionY -> abs(yBlock-collisionY) < xTouchDist, RtDir),
+                    \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, RtDir),
                 (yint (xBlock - xTouchDist) trajectory,
-                    \ _ collisionY -> abs(yBlock-collisionY) < xTouchDist, LfDir)]
+                    \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, LfDir)]
             ((collisionX,collisionY),collisionT) <- potentialCollisions
             if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
             then [Collision (collisionX,collisionY) collisionT block direction]
