@@ -38,7 +38,7 @@ main = play displayMode white 60
     initialWorld
     renderWorld
     handleEvent
-    stepWorld
+    (const id) --stepWorld
  
 --TODO:
 
@@ -61,17 +61,17 @@ stepWorld dt = execState (stepWorld' dt)
 
 stepWorld' :: Time -> State World ()
 stepWorld' dt = do
-    Player pos vel jumpStatus <- use player
-    case jumpStatus of
-        Standing blockKey -> undefined
+    Player movementStatus <- use player
+    case movementStatus of
+        Standing blockKey xOffset vx ax-> undefined
             --Check if you're going to run off the block
             --If you do, either support you with a new block or transition to falling
-        Jumping upAccel -> undefined
+        Jumping pt vel jumpAccel -> undefined
             --Decrease the upward acceleration, but keep accelerating up
             --CrapCrapCrap I made this cubic
-        Falling -> undefined
+        Falling pt vel-> undefined
             --Check for collisions
-        NewlyFalling timeLeft -> undefined
+        NewlyFalling pt vel timeLeft -> undefined
             --Permit jumping in this state, but otherwise fall.
 
 
@@ -369,8 +369,8 @@ renderTrajectory xLim yLim trajectory@(Parabola (x0,y0) (vx,vy) ay) =
         x0f = x0*scaleFactor
         y0f = y0*scaleFactor
         tPeak = -vy/ay
-        yPeak = scaleFactor * snd (atT trajectory tPeak)
-        yOfX x = scaleFactor * snd (atT trajectory $ (x/scaleFactor-x0)/vx)
+        yPeak = scaleFactor * snd (startPoint $ atT trajectory tPeak)
+        yOfX x = scaleFactor * snd (startPoint $ atT trajectory $ (x/scaleFactor-x0)/vx)
 renderPlayer :: Point -> Picture
 renderPlayer (x,y) = Scale scaleFactor scaleFactor $ Translate x y $
     Polygon [(0.2,0.4),(-0.2,0.4),(-0.2,-0.4),(0.2,-0.4)]

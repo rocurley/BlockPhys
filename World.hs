@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module World
-( Velocity(..)
+( Velocity
 , Trajectory(..)
 , IntPt
 , BlockType(..)
@@ -10,20 +10,20 @@ module World
 , BlockVal(..)
 , blockType
 , cci
-, Block(..)
-, BlockMap(..)
+, Block
+, BlockMap
 , LinkKey(..)
 , LinkDir(..)
 , LinkVal(..)
-, Link(..)
-, LinkMap(..)
+, Link
+, LinkMap
 , Force(..)
-, CConKey(..)
-, CConVal(..)
-, CCon(..)
-, CConMap(..)
+, CConKey
+, CConVal
+, CCon
+, CConMap
 , Player(..)
-, JumpStatus(..)
+, PlayerMovement(..)
 , World(..)
 , playerWidth
 , playerHeight
@@ -54,7 +54,8 @@ type IntPt = (Int,Int)
 
 type Velocity = (Float,Float)
 
-data Trajectory = Parabola Point Velocity Float deriving (Show,Eq,Ord)
+data Trajectory = Parabola Point Velocity Float |
+                  JumpTrajectory Point Velocity Float Float Float deriving (Show,Eq,Ord)
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 newtype BlockKey = BlockKey {_blockLoc :: IntPt} deriving (Eq,Ord,Show)
@@ -74,6 +75,8 @@ type LinkMap  = Map LinkKey LinkVal
 
 
 data Force = Force {_up :: Double, _right :: Double, _rotCCW :: Double} deriving (Eq,Ord,Show)
+
+force0 :: Force
 force0 = Force 0 0 0
 
 data Direction = UpDir| DnDir | LfDir | RtDir deriving (Eq,Ord,Show)
@@ -83,9 +86,18 @@ type CConVal = Int
 type CCon = (CConKey,CConVal)
 type CConMap = Map CConKey CConVal
 
-data Player = Player {_playerLoc :: Point,_playerVel :: Velocity, _jumpStatus :: JumpStatus} 
+newtype Player = Player PlayerMovement --Will have other things later
 
-data JumpStatus = Standing BlockKey | Jumping Float | Falling | NewlyFalling Float
+data PlayerMovement = Standing BlockKey Float Float Float| 
+                      Jumping Point Velocity Float | --Jerk is implicit, accel does not include gravity
+                      Falling Point Velocity |
+                      NewlyFalling Point Velocity Float
+
+playerTrajectory :: Player -> Trajectory
+playerTrajectory (Player (Standing (BlockKey (x,y)) xOffset vx ax)) = undefined
+playerTrajectory (Player (Jumping (x,y) (vx,vy) ay)) = undefined
+playerTrajectory (Player (Falling (x,y) (vx,vy))) = undefined
+playerTrajectory (Player (NewlyFalling (x,y) (vx,vy) timeleft)) = undefined
 
 data World = World {_blocks :: BlockMap,
                     _links :: LinkMap,
@@ -98,13 +110,16 @@ makeLenses ''BlockVal
 makeLenses ''BlockKey
 makeLenses ''Player
 
-playerWidth = 0.4 :: Float
-playerHeight = 0.8 :: Float
+playerWidth :: Float
+playerWidth = 0.4
+playerHeight :: Float
+playerHeight = 0.8
 
 popCci :: CConVal -> State World Int
 popCci grounded = do
     i:is <- use cCis
     cCis.=is
+    cCons%=H.insert i grounded
     return i
 
 pushCci :: Int -> State World ()
@@ -119,7 +134,8 @@ instance Applicative m => Monoid (AEndo a m) where
         mempty = AEndo $ pure id
         AEndo f `mappend` AEndo g = AEndo $ (.) <$> f <*> g
 
-atMulti :: (Applicative m,Foldable f,Ord k) => f k -> (Maybe v -> m (Maybe v)) -> Map k v -> m (Map k v)
+atMulti :: (Applicative m,Foldable f,Ord k) =>
+    f k -> (Maybe v -> m (Maybe v)) -> Map k v -> m (Map k v)
 atMulti keys f mp = ($ mp) <$> appAEndo (foldMap (AEndo . alter) keys) where
     alter k = mapSet k <$> f (H.lookup k mp)
 
