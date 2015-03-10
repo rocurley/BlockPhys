@@ -148,7 +148,7 @@ atT traj@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) t = let
         (vx',vy') = (vx,1/2*jerk*t'^2 + (aG+aJump)*t' + vy)
         aJump' = aJump + t'*jerk
         in JumpTrajectory (x',y') (vx',vy') aJump' aG jerk
-    in case compare tJumpEnd t of
+    in case (compare t tJumpEnd) of
         GT -> let
             JumpTrajectory pt v _ aG _ = naiveAtT tJumpEnd
             in atT (Parabola pt v aG) (t-tJumpEnd)
@@ -162,6 +162,8 @@ xint :: Float -> Trajectory -> [(Point,Time)]
 xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) =
     -- 0 = 1/2*ay*t^2 + vy*t + (y-lineY)
     [(startPoint $ atT trajectory t,t)|t <- solveQuadratic (1/2*ay) vy (y-lineY)]
+xint lineY (JumpTrajectory (x,y) (vx,vy) aJump aG 0) =
+    xint lineY $ Parabola (x,y) (vx,vy) (aJump+aG)
 xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) = let
     -- 0 = 1/6*jerk*t^3+1/2*(aJump+aG)*t^2 + vy*t + (y-lineY)
     tJumpEnd = -aJump/jerk
@@ -215,9 +217,11 @@ predictCollision trajectory dt = do
                 (yint (xBlock - xTouchDist) trajectory,
                     \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, LfDir)]
             ((collisionX,collisionY),collisionT) <- potentialCollisions
-            if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
-            then [Collision (collisionX,collisionY) collisionT block direction]
-            else []
+            traceShow ((collisionX,collisionY),collisionT) $
+                traceShow (atT trajectory collisionT) $
+                if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
+                then [Collision (collisionX,collisionY) collisionT block direction]
+                else []
     return $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) collisions
 
 bisect :: (Float -> Float) -> Float -> Float -> Float

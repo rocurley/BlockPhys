@@ -52,7 +52,7 @@ displayMode = InWindow "Hello World" (560,560) (1000,50)
 scaleFactor = 80
 blockSize = 0.95
 initialPlayer = undefined
-initialWorld = World (H.singleton (BlockKey (0,0)) (BlockVal Bedrock 0))
+initialWorld = World (H.singleton (BlockKey (1,-3)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer
 
 
@@ -82,8 +82,9 @@ renderWorld world@(World blocks links _ _ player)= let
     linkPictures = Pictures $ map renderLink $ H.toList links
     debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
-    testTrajectory = Parabola (-1,-1) (1,1) (-1)
+    testTrajectory = JumpTrajectory (-1,-1) (1,0) (3) (-1) (-5)
     trajectoryPicture = renderTrajectory 280 280 testTrajectory
+    playerPts = Pictures [renderPlayer $ traceShowId $ startPoint $ atT testTrajectory x | x<- [2.527882]]
     playerCollision = (`evalState` world) $ predictCollision testTrajectory 5
     grid = Scale scaleFactor scaleFactor $ Pictures $
         [Line [(x,-3),(x,3)]|x<-[-3..3]] ++ [Line [(-3,y),(3,y)]|y<-[-3..3]]
@@ -110,12 +111,6 @@ handleBlockClick key  = do
     blockVal <- use $ blocks.at key
     cycleBlock (key,blockVal)
     setForces
-    --blockKeys <- use $ blocks.to H.keys
-    --blockStresses <- traverse blockStress blockKeys
-    --links' <- use links
-    --traceShow links' $ return ()
-    --traceShow (H.fromList $ zip blockKeys blockStresses) $ return ()
-
     where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
           cycleBlock (key,Nothing) = do
               cci <- popCci 0
@@ -128,10 +123,11 @@ handleBlockClick key  = do
 handleLinkClick :: LinkKey -> State World ()
 handleLinkClick linkKey = do
     link <- use $ links.at linkKey
-    case link of
+    success <- case link of
         Just OffLink    -> linkOn linkKey force0
         Just (OnLink _) -> linkOff linkKey
         Nothing -> error "handleLinkClick got a missing Link"
+    unless success $ return $ error "link On/Off failed despite lookup success"
     setForces
 
 linkOff :: LinkKey -> State World Bool
@@ -240,7 +236,7 @@ possibleLinks (BlockKey (x,y)) = H.fromList
 
 removeBlock :: BlockKey -> State World Bool
 removeBlock blockKey = fmap isJust $ runMaybeT $ do
-    lift $ traverse (linkOff . snd) $ possibleLinks blockKey
+    _ <- lift $ traverse (linkOff . snd) $ possibleLinks blockKey
     BlockVal _ cci <- MaybeT $ use $ blocks.at blockKey
     lift $ links.atMulti (snd <$> possibleLinks blockKey).= Nothing
     lift $ blocks.at blockKey.= Nothing
@@ -274,6 +270,7 @@ subgraph blockKey = dfs [blockKey] (S.empty,0) where
         case block of
             Just (BlockVal Bedrock _) -> return 1
             Just (BlockVal _ _) -> return 0 
+            Nothing -> error "blockKey not found in blockMap"
     dfs :: [BlockKey] -> (S.Set BlockKey,Int) -> State World (S.Set BlockKey,Int)
     dfs [] out = return out
     dfs (x:xs) (visited,grounded)
@@ -301,8 +298,8 @@ linkGrounded key = do
 setForces :: State World ()
 setForces = do
     blocksGrounded <- traverse (
-        \ (BlockVal blockType cci) -> do
-            Just cc <- use $ cCons.at cci 
+        \ (BlockVal blockType blockCCi) -> do
+            Just cc <- use $ cCons.at blockCCi 
             return (blockType==Bedrock,cc)
         ) =<< use blocks
     let blockForces = const g <$> H.filter (
@@ -318,7 +315,7 @@ setForces = do
 
 blockStress :: BlockKey -> State World Stress
 blockStress key = do
-    maybeLinkVals <- H.toList <$> traverse (\ key -> use (links.at key)) (snd <$> possibleLinks key)
+    maybeLinkVals <- H.toList <$> traverse (\ k -> use (links.at k)) (snd <$> possibleLinks key)
     return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]
 
 vector2Point :: R 2 -> Point
@@ -344,9 +341,9 @@ renderStress  (Stress stressMatrix) = let
     [u,v] = SLA.toColumns eigenVectors
     [lu,lv] = LA.toList $ SLA.extract eigenValues
     renderStressComp :: Double -> R 2 -> R 2 -> Picture
-    renderStressComp mag u v = let
-        baseArrow = drawArrow u v $ double2Float (mag/4)
-        (x,y) = vector2Point u
+    renderStressComp mag u' v' = let
+        baseArrow = drawArrow u' v' $ double2Float (mag/4)
+        (x,y) = vector2Point u'
         arrow = case compare mag 0 of
             GT -> Translate (x/8) (y/8) baseArrow
             EQ -> Blank
@@ -355,21 +352,16 @@ renderStress  (Stress stressMatrix) = let
     in Pictures [renderStressComp lu u v,renderStressComp lv v u]
 
 renderTrajectory :: Float -> Float -> Trajectory -> Picture
-
-renderTrajectory xLim yLim trajectory@(Parabola (x0,y0) (vx,vy) ay) =
-    case (compare vx 0,compare ay 0, compare vy 0) of
-        (LT,_,_) -> Line [(x,yOfX x)|x<-[-xLim..x0f]]
-        (GT,_,_) -> Line [(x,yOfX x)|x<-[x0f..xLim]]
-        (EQ,LT,_) -> Line [(x0f,yPeak),(x0f,-yLim)] 
-        (EQ,GT,_) -> Line [(x0f,yPeak),(x0f,yLim)] 
-        (EQ,EQ,LT) -> Line [(x0f,y0f),(x0f,-yLim)] 
-        (EQ,EQ,GT) -> Line [(x0f,y0f),(x0f,yLim)] 
-        (EQ,EQ,EQ) -> Blank
+renderTrajectory xLim _ trajectory =
+    case compare vx 0 of
+        LT -> Line [(x,yOfX x)|x<-[-xLim..x0f]]
+        GT -> Line [(x,yOfX x)|x<-[x0f..xLim]]
+        EQ -> Blank --Screw all that
     where
+        (x0,vx) = case trajectory of
+            Parabola (x0',_) (vx',_) _ -> (x0', vx')
+            JumpTrajectory (x0',_) (vx',_) _ _ _ -> (x0', vx')
         x0f = x0*scaleFactor
-        y0f = y0*scaleFactor
-        tPeak = -vy/ay
-        yPeak = scaleFactor * snd (startPoint $ atT trajectory tPeak)
         yOfX x = scaleFactor * snd (startPoint $ atT trajectory $ (x/scaleFactor-x0)/vx)
 renderPlayer :: Point -> Picture
 renderPlayer (x,y) = Scale scaleFactor scaleFactor $ Translate x y $
