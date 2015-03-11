@@ -1,7 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module World
-( Velocity
+( scaleFactor
+, blockSize
+, Velocity
 , Trajectory(..)
 , IntPt
 , BlockType(..)
@@ -38,6 +40,7 @@ module World
 , pushCci
 , linkedBlocks
 , atMulti
+, possibleLinks
 ) where
 
 import Graphics.Gloss.Interface.Pure.Game
@@ -50,10 +53,16 @@ import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Data.Monoid
 import Data.Foldable
 
+scaleFactor :: Float
+scaleFactor = 80
+blockSize :: Float
+blockSize = 0.95
+
 type IntPt = (Int,Int)
 
 type Velocity = (Float,Float)
 
+--Consider adding a "Patched Trajectory".
 data Trajectory = Parabola Point Velocity Float |
                   JumpTrajectory Point Velocity Float Float Float deriving (Show,Eq,Ord)
 
@@ -142,3 +151,10 @@ atMulti keys f mp = ($ mp) <$> appAEndo (foldMap (AEndo . alter) keys) where
 mapSet :: Ord k => k -> Maybe v -> Map k v -> Map k v
 mapSet k (Just v) = H.insert k v
 mapSet k Nothing = H.delete k
+
+possibleLinks :: BlockKey -> Map Direction (BlockKey,LinkKey)
+possibleLinks (BlockKey (x,y)) = H.fromList 
+                                 [(RtDir, (BlockKey (x+1,y),Link L2R (x  ,y  ))),
+                                  (LfDir, (BlockKey (x-1,y),Link L2R (x-1,y  ))),
+                                  (DnDir, (BlockKey (x,y-1),Link D2U (x  ,y-1))),
+                                  (UpDir, (BlockKey (x,y+1),Link D2U (x  ,y  )))]

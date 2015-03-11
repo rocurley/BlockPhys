@@ -6,6 +6,7 @@ module Physics
 , Stress(..)
 , Time
 , stressFromLinks
+, blockStress
 , Trajectory(..)
 , Collision(..)
 , startPoint
@@ -13,7 +14,7 @@ module Physics
 , predictCollision) where
 
 import Prelude hiding (foldr,foldl,mapM,mapM_,sequence,minimum,maximum,(^))
-import qualified Prelude
+import qualified Prelude ((^))
 
 import Graphics.Gloss.Interface.Pure.Game
 
@@ -29,11 +30,12 @@ import Numeric.IEEE
 
 import Data.List hiding (foldr,foldl,foldl',minimum,maximum)
 import Control.Monad hiding (mapM,mapM_)
-import Control.Monad.State.Strict hiding (mapM,mapM_)
+import Control.Monad.Reader hiding (mapM,mapM_)
+import Control.Applicative
 import Data.Monoid
 import Data.Foldable
 import Data.Ord
-import Safe
+import Safe hiding (at)
 
 import Control.Lens
 
@@ -128,9 +130,13 @@ stressFromLinks = foldMap toStress where
                 RtDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,-1,0])
                 LfDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,1,0])
             in Stress $ konst up*upMat+konst right*rightMat+konst rotCCW*rotCCWMat
-
 type Time = Float
 data Collision  = Collision Point Time BlockKey Direction deriving (Show,Eq,Ord)
+
+blockStress :: BlockKey -> Reader World Stress
+blockStress key = do
+    maybeLinkVals <- H.toList <$> traverse (\ k -> view (links.at k)) (snd <$> possibleLinks key)
+    return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]
 
 startPoint :: Trajectory -> Point
 startPoint (Parabola pt _ _) = pt
@@ -196,14 +202,14 @@ trajectoryBox trajectory dt = let
     (xs,ys) = unzip $ map (startPoint . atT trajectory) ts
     in ((minimum xs,maximum xs),(minimum ys,maximum ys))
 
-predictCollision :: Trajectory -> Float -> State World (Maybe Collision)
+predictCollision :: Trajectory -> Float -> Reader World (Maybe Collision)
 predictCollision trajectory dt = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
     let (xTouchDist,yTouchDist) = ((playerWidth+1)/2,(playerHeight+1)/2)
     let blockCandidates = [BlockKey (blockX,blockY)|
             blockX<-[ceiling (xmin-xTouchDist)..floor (xmax+xTouchDist)],
             blockY<-[ceiling (ymin-yTouchDist)..floor (ymax+yTouchDist)]]
-    blocksInBox <- filterM (\ block -> use $ blocks.to (H.member block)) blockCandidates
+    blocksInBox <- filterM (\ block -> view $ blocks.to (H.member block)) blockCandidates
     let collisions = do --List monad
             block@(BlockKey (xBlockInt,yBlockInt)) <- blocksInBox
             let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)

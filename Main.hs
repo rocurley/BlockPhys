@@ -1,6 +1,5 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase  #-}
-{-# LANGUAGE DataKinds #-}
 
 import Prelude hiding (foldr,foldl,mapM,mapM_,sequence,concatMap)
 
@@ -17,6 +16,7 @@ import Control.Arrow
 import Control.Applicative
 import Control.Monad hiding (mapM,mapM_)
 import Control.Monad.State.Strict hiding (mapM,mapM_)
+import Control.Monad.Reader hiding (mapM,mapM_)
 import Control.Monad.Trans.Maybe
 
 import Debug.Trace
@@ -24,19 +24,15 @@ import Debug.Trace
 import qualified Data.Map as H
 import qualified Data.Set as S
 
-import qualified Numeric.LinearAlgebra.HMatrix as LA
-import Numeric.LinearAlgebra.Static as SLA
-import qualified Data.Packed.Vector as V
-import GHC.Float
-
 import Control.Lens
 
 import World
 import Physics
+import Render
 
 main = play displayMode white 60
     initialWorld
-    renderWorld
+    (runReader renderWorld)
     handleEvent
     (const id) --stepWorld
  
@@ -49,12 +45,12 @@ main = play displayMode white 60
 --Need to establish exactly what our units are.
 
 displayMode = InWindow "Hello World" (560,560) (1000,50)
-scaleFactor = 80
-blockSize = 0.95
 initialPlayer = undefined
 initialWorld = World (H.singleton (BlockKey (1,-3)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer
 
+asState :: Reader s a -> State s a
+asState reader = runReader reader <$> get
 
 stepWorld :: Time -> World -> World
 stepWorld dt = execState (stepWorld' dt)
@@ -74,33 +70,9 @@ stepWorld' dt = do
         NewlyFalling pt vel timeLeft -> undefined
             --Permit jumping in this state, but otherwise fall.
 
-
-renderWorld :: World -> Picture
-renderWorld world@(World blocks links _ _ player)= let
-    blockPictures = Pictures $ (`evalState` world) $ mapM renderBlock $ H.keys blocks
-    stressPictures = Pictures $ (`evalState` world) $ mapM renderBlockStress $ H.keys blocks
-    linkPictures = Pictures $ map renderLink $ H.toList links
-    debug = scale scaleFactor scaleFactor $ Pictures
-                  [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
-    testTrajectory = JumpTrajectory (-1,-1) (1,0) (3) (-1) (-5)
-    trajectoryPicture = renderTrajectory 280 280 testTrajectory
-    playerPts = Pictures [renderPlayer $ traceShowId $ startPoint $ atT testTrajectory x | x<- [2.527882]]
-    playerCollision = (`evalState` world) $ predictCollision testTrajectory 5
-    grid = Scale scaleFactor scaleFactor $ Pictures $
-        [Line [(x,-3),(x,3)]|x<-[-3..3]] ++ [Line [(-3,y),(3,y)]|y<-[-3..3]]
-    in Pictures $ [grid,blockPictures,linkPictures,stressPictures,trajectoryPicture] ++
-        case playerCollision of
-            Nothing -> [] 
-            Just (Collision (x,y) t (BlockKey (xi,yi)) direction) -> let
-                linkPicture = case direction of
-                    UpDir -> renderLink (Link D2U (xi,yi),OffLink)
-                    DnDir -> renderLink (Link D2U (xi,yi-1),OffLink)
-                    LfDir -> renderLink (Link L2R (xi-1,yi),OffLink)
-                    RtDir -> renderLink (Link L2R (xi,yi),OffLink)
-                in [renderPlayer (x,y),linkPicture]
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
-    linkClicked <- linkClickCheck pt
+    linkClicked <- asState $ linkClickCheck pt
     case linkClicked of 
         Just linkKey -> handleLinkClick linkKey
         Nothing -> handleBlockClick (BlockKey $ roundToIntPoint pt)
@@ -137,7 +109,7 @@ linkOff linkKey = fmap isJust $ runMaybeT $ do
     let (blockA,blockB) = linkedBlocks linkKey
     (BlockVal _ ccKeyA) <- MaybeT $ use $ blocks.at blockA
     grounded <- MaybeT $ use $ cCons.at ccKeyA
-    (connectedToB,bGrounded) <- lift $ subgraph blockB
+    (connectedToB,bGrounded) <- lift $ asState $ subgraph blockB
     unless (S.member blockA connectedToB) $ do
         lift $ cCons.at ccKeyA %= fmap (subtract bGrounded)
         cciB <- lift $ popCci bGrounded
@@ -150,68 +122,22 @@ linkOn linkKey force = fmap isJust $ runMaybeT $ do
     BlockVal _ cciA <- MaybeT $ use $ blocks.at blockA 
     BlockVal _ cciB <- MaybeT $ use $ blocks.at blockB
     aGrounded <- MaybeT $ use $ cCons.at cciA
-    (connectedToB,bGrounded) <- lift $ subgraph blockB
+    (connectedToB,bGrounded) <- lift $ asState $ subgraph blockB
     lift $ assign (links.at linkKey) $ Just $ OnLink force
     unless (cciA == cciB) $ do
         lift $ assign (cCons.at cciA.traverse) (aGrounded + bGrounded)
         lift $ pushCci cciB
         lift $ blocks.atMulti connectedToB.traverse.cci.= cciA
 
-renderBlock :: BlockKey -> State World Picture
-renderBlock blockKey@(BlockKey (xi,yi)) = do
-    BlockVal blockType cci <- fromJust <$> use (blocks.at blockKey)
-    grounded <- (>0) <$> fromJust <$> use (cCons.at cci)
-    let (x,y) = (fromIntegral xi, fromIntegral yi)
-    let c = case (blockType,grounded) of
-            (Normal,True)  -> greyN 0.3
-            (Normal,False) -> greyN 0.6
-            (Bedrock,_)    -> black
-    let box = scale blockSize blockSize $ color c $
-                Polygon [(-0.5,-0.5),(0.5,-0.5),(0.5,0.5),(-0.5,0.5)]
-    let cciLabel = translate (-0.25) (-0.3) $
-                        scale (0.5/scaleFactor) (0.5/scaleFactor) $
-                        color red $ Text $ show cci
-    return $ scale scaleFactor scaleFactor $
-        translate x y $
-        Pictures [box]
-
-renderBlockStress :: BlockKey -> State World Picture
-renderBlockStress blockKey@(BlockKey (xi,yi)) = do
-    blockVal <- use $ blocks.at blockKey
-    case blockVal of
-        Nothing -> error "Trying to render an invalid blockKey"
-        Just (BlockVal Bedrock _) -> return Blank
-        _ -> do
-            stress <- blockStress blockKey
-            let (x,y) = (fromIntegral xi, fromIntegral yi)
-            return $ scale scaleFactor scaleFactor $ translate x y $ renderStress stress
-
-renderLink :: Link -> Picture
-renderLink (Link linkDirection (xi,yi),linkVal) = color c $
-    scale scaleFactor scaleFactor $ translate x y d
-    where x = fromIntegral xi
-          y = fromIntegral yi
-          c = case linkVal of
-              OffLink  -> makeColor 1 0 0 0.3
-              OnLink _ -> red
-          d = case linkDirection of
-              L2R -> diamond
-              D2U -> rotate (-90) diamond
-
-diamond = translate 0.5 0 $ scale 0.8 0.8 $
-          Polygon [(-l,0.5-l),(0,0.5),(l,0.5-l),
-                   (l,-0.5+l),(0,-0.5),(-l,-0.5+l)]
-          where l = 0.2
-
-linkClickCheck :: Point -> State World (Maybe LinkKey)
+linkClickCheck :: Point -> Reader World (Maybe LinkKey)
 linkClickCheck (x,y) = let
     (xi,xrem) = divMod' (x/scaleFactor) 1
     (yi,yrem) = divMod' (y/scaleFactor) 1
     u = xrem + yrem -1
     v = yrem - xrem
-    linkTester :: Point -> LinkKey -> State World (Maybe LinkKey)
+    linkTester :: Point -> LinkKey -> Reader World (Maybe LinkKey)
     linkTester (x,y) linkKey = do
-        linkVal <- use $ links.at linkKey
+        linkVal <- view $ links.at linkKey
         return $ if inDiamond (x,y) && isJust linkVal
                  then Just linkKey
                  else Nothing
@@ -226,13 +152,6 @@ inDiamond :: Point -> Bool
 inDiamond (x,y) = x'+y'<0.5 && x' < 0.2 && y' < 0.5
     where
         (x',y') = (abs $ (x-0.5)/0.8, abs $ y/0.8)
-
-possibleLinks :: BlockKey -> H.Map Direction (BlockKey,LinkKey)
-possibleLinks (BlockKey (x,y)) = H.fromList 
-                                 [(RtDir, (BlockKey (x+1,y),Link L2R (x  ,y  ))),
-                                  (LfDir, (BlockKey (x-1,y),Link L2R (x-1,y  ))),
-                                  (DnDir, (BlockKey (x,y-1),Link D2U (x  ,y-1))),
-                                  (UpDir, (BlockKey (x,y+1),Link D2U (x  ,y  )))]
 
 removeBlock :: BlockKey -> State World Bool
 removeBlock blockKey = fmap isJust $ runMaybeT $ do
@@ -254,24 +173,24 @@ addBlock (blockKey @(BlockKey (x,y)),val) = do
 roundToIntPoint :: Point -> IntPt
 roundToIntPoint (x,y) = (round (x/scaleFactor), round (y/scaleFactor))
 
-connectedNeighbors :: BlockKey -> State World [BlockKey]
+connectedNeighbors :: BlockKey -> Reader World [BlockKey]
 connectedNeighbors blockKey = do
-    links' <- use links --TODO: MAKE THIS NOT DUMB
+    links' <- view links --TODO: MAKE THIS NOT DUMB
     return [blockKey|(blockKey,linkKey) <- H.elems $ possibleLinks blockKey,
         case H.lookup linkKey links' of
             Just (OnLink _) -> True
             _ -> False]
 
-subgraph :: BlockKey -> State World (S.Set BlockKey,Int)
+subgraph :: BlockKey -> Reader World (S.Set BlockKey,Int)
 subgraph blockKey = dfs [blockKey] (S.empty,0) where
-    isBedrock :: BlockKey -> State World Int
+    isBedrock :: BlockKey -> Reader World Int
     isBedrock blockKey = do
-        block <- use $ blocks.at blockKey
+        block <- view $ blocks.at blockKey
         case block of
             Just (BlockVal Bedrock _) -> return 1
             Just (BlockVal _ _) -> return 0 
             Nothing -> error "blockKey not found in blockMap"
-    dfs :: [BlockKey] -> (S.Set BlockKey,Int) -> State World (S.Set BlockKey,Int)
+    dfs :: [BlockKey] -> (S.Set BlockKey,Int) -> Reader World (S.Set BlockKey,Int)
     dfs [] out = return out
     dfs (x:xs) (visited,grounded)
         |x `S.member` visited = dfs xs (visited,grounded)
@@ -281,16 +200,16 @@ subgraph blockKey = dfs [blockKey] (S.empty,0) where
             let acc = (S.insert x visited, newGrounded)
             dfs (new ++ xs) acc
 
-linkGrounded :: LinkKey -> State World Bool
+linkGrounded :: LinkKey -> Reader World Bool
 linkGrounded key = do
-    maybeLinkVal <- use $ links.at key
+    maybeLinkVal <- view $ links.at key
     case maybeLinkVal of
         Nothing -> return False
         Just OffLink -> return False
         Just _ -> do
             let (blockKey,_) = linkedBlocks key
-            Just (BlockVal _ cci) <- use $ blocks.at blockKey
-            uses (cCons.at cci) $ \case
+            Just (BlockVal _ cci) <- view $ blocks.at blockKey
+            views (cCons.at cci) $ \case
                 Nothing -> error "cci not found"
                 Just 0  -> False
                 _       -> True
@@ -306,63 +225,9 @@ setForces = do
             \ (isBedrock,nGroundings) ->
                 not isBedrock && nGroundings > 0
             )blocksGrounded
-    activeLinks <- filterM linkGrounded =<< (H.keys <$> use links)
+    activeLinks <- asState $ filterM linkGrounded =<< (H.keys <$> view links)
     let forces = solveForces blockForces activeLinks
     traverse_ (\ (linkKey,force) -> let
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
         in links.at linkKey%= fmap updateLink) $ H.toList forces
-
-blockStress :: BlockKey -> State World Stress
-blockStress key = do
-    maybeLinkVals <- H.toList <$> traverse (\ k -> use (links.at k)) (snd <$> possibleLinks key)
-    return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]
-
-vector2Point :: R 2 -> Point
-vector2Point = (\ [x,y] -> (double2Float x,double2Float y)) . V.toList . SLA.extract
-
-drawArrow :: R 2 -> R 2 -> Float -> Picture
-drawArrow u v width' = scale (1/4) (1/4) $ Pictures [box,triangle]
-    where
-        width = vector [float2Double width',float2Double width'] :: R 2
-        diffsToPolygon :: R 2 -> [R 2] -> Picture
-        diffsToPolygon start = Polygon . map vector2Point . scanl (+) start
-        box = diffsToPolygon (u/2+(width/2)*v)
-            ([ (3/5)*u,
-              (-width)*v,
-              (-3/5)*u] :: [R 2])
-        triangle = diffsToPolygon (u/2+width*v+(3/5)*u)
-            ([ (2/5)*u - width*v,
-              (-2/5)*u -width*v] :: [R 2])
-
-renderStress :: Stress -> Picture
-renderStress  (Stress stressMatrix) = let
-    (eigenValues,eigenVectors) = SLA.eigensystem $ sym stressMatrix
-    [u,v] = SLA.toColumns eigenVectors
-    [lu,lv] = LA.toList $ SLA.extract eigenValues
-    renderStressComp :: Double -> R 2 -> R 2 -> Picture
-    renderStressComp mag u' v' = let
-        baseArrow = drawArrow u' v' $ double2Float (mag/4)
-        (x,y) = vector2Point u'
-        arrow = case compare mag 0 of
-            GT -> Translate (x/8) (y/8) baseArrow
-            EQ -> Blank
-            LT -> Translate (-x*(1/4+1/8)) (-y*(1/4+1/8)) baseArrow
-        in Pictures [arrow, Rotate 180 arrow]
-    in Pictures [renderStressComp lu u v,renderStressComp lv v u]
-
-renderTrajectory :: Float -> Float -> Trajectory -> Picture
-renderTrajectory xLim _ trajectory =
-    case compare vx 0 of
-        LT -> Line [(x,yOfX x)|x<-[-xLim..x0f]]
-        GT -> Line [(x,yOfX x)|x<-[x0f..xLim]]
-        EQ -> Blank --Screw all that
-    where
-        (x0,vx) = case trajectory of
-            Parabola (x0',_) (vx',_) _ -> (x0', vx')
-            JumpTrajectory (x0',_) (vx',_) _ _ _ -> (x0', vx')
-        x0f = x0*scaleFactor
-        yOfX x = scaleFactor * snd (startPoint $ atT trajectory $ (x/scaleFactor-x0)/vx)
-renderPlayer :: Point -> Picture
-renderPlayer (x,y) = Scale scaleFactor scaleFactor $ Translate x y $
-    Polygon [(0.2,0.4),(-0.2,0.4),(-0.2,-0.4),(0.2,-0.4)]
