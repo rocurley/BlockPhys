@@ -3,6 +3,9 @@
 module World
 ( scaleFactor
 , blockSize
+, g
+, jumpJerk
+, vJump
 , Velocity
 , Trajectory(..)
 , IntPt
@@ -25,6 +28,7 @@ module World
 , CCon
 , CConMap
 , Player(..)
+, playerMovement
 , PlayerMovement(..)
 , World(..)
 , playerWidth
@@ -41,6 +45,7 @@ module World
 , linkedBlocks
 , atMulti
 , possibleLinks
+, playerTrajectory
 ) where
 
 import Graphics.Gloss.Interface.Pure.Game
@@ -57,6 +62,13 @@ scaleFactor :: Float
 scaleFactor = 80
 blockSize :: Float
 blockSize = 0.95
+g :: Float
+g = -1
+jumpJerk :: Float
+jumpJerk = -5
+vJump :: Float
+vJump = 5
+
 
 type IntPt = (Int,Int)
 
@@ -64,6 +76,7 @@ type Velocity = (Float,Float)
 
 --Consider adding a "Patched Trajectory".
 data Trajectory = Parabola Point Velocity Float |
+                  RunTrajectory Point Float Float Float |
                   JumpTrajectory Point Velocity Float Float Float deriving (Show,Eq,Ord)
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
@@ -95,18 +108,12 @@ type CConVal = Int
 type CCon = (CConKey,CConVal)
 type CConMap = Map CConKey CConVal
 
-newtype Player = Player PlayerMovement --Will have other things later
+newtype Player = Player {_playerMovement :: PlayerMovement} --Will have other things later
 
 data PlayerMovement = Standing BlockKey Float Float Float| 
                       Jumping Point Velocity Float | --Jerk is implicit, accel does not include gravity
                       Falling Point Velocity |
                       NewlyFalling Point Velocity Float
-
-playerTrajectory :: Player -> Trajectory
-playerTrajectory (Player (Standing (BlockKey (x,y)) xOffset vx ax)) = undefined
-playerTrajectory (Player (Jumping (x,y) (vx,vy) ay)) = undefined
-playerTrajectory (Player (Falling (x,y) (vx,vy))) = undefined
-playerTrajectory (Player (NewlyFalling (x,y) (vx,vy) timeleft)) = undefined
 
 data World = World {_blocks :: BlockMap,
                     _links :: LinkMap,
@@ -118,11 +125,6 @@ makeLenses ''World
 makeLenses ''BlockVal
 makeLenses ''BlockKey
 makeLenses ''Player
-
-playerWidth :: Float
-playerWidth = 0.4
-playerHeight :: Float
-playerHeight = 0.8
 
 popCci :: CConVal -> State World Int
 popCci grounded = do
@@ -158,3 +160,26 @@ possibleLinks (BlockKey (x,y)) = H.fromList
                                   (LfDir, (BlockKey (x-1,y),Link L2R (x-1,y  ))),
                                   (DnDir, (BlockKey (x,y-1),Link D2U (x  ,y-1))),
                                   (UpDir, (BlockKey (x,y+1),Link D2U (x  ,y  )))]
+
+
+playerVel :: Functor f => (Velocity -> f Velocity) -> PlayerMovement -> f PlayerMovement
+playerVel f (Standing support xOffset vx ax) =
+    (\ (vx',_) -> Standing support xOffset vx' ax) <$> f (vx,0)
+playerVel f (Jumping pt v ay) = (\ v' -> Jumping pt v' ay) <$> f v
+playerVel f (Falling pt v) = (\ v' -> Falling pt v') <$> f v
+playerVel f (NewlyFalling pt v t) = (\ v' -> NewlyFalling pt v' t) <$> f v
+
+playerWidth :: Float
+playerWidth = 0.4
+playerHeight :: Float
+playerHeight = 0.8
+
+playerTrajectory :: PlayerMovement -> Trajectory
+playerTrajectory (Standing (BlockKey (x,y)) xOffset vx ax) =
+        Parabola (fromIntegral x+xOffset,fromIntegral y+playerHeight/2) (vx,0) 0
+playerTrajectory (Jumping (x,y) (vx,vy) ay) =
+    JumpTrajectory (x,y) (vx,vy) ay g jumpJerk
+playerTrajectory (Falling (x,y) (vx,vy)) =
+    Parabola (x,y) (vx,vy) g
+playerTrajectory (NewlyFalling (x,y) (vx,vy) timeleft) =
+    Parabola (x,y) (vx,vy) g

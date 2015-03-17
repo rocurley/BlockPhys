@@ -5,21 +5,18 @@ import Prelude hiding (foldr,foldl,mapM,mapM_,sequence,concatMap)
 
 import Graphics.Gloss.Interface.Pure.Game
 
-import Data.List hiding (foldr,foldl,foldl',concatMap)
-import Data.Monoid
 import Data.Foldable
 import Data.Fixed
 import Data.Traversable
 import Data.Maybe
 
-import Control.Arrow
 import Control.Applicative
 import Control.Monad hiding (mapM,mapM_)
 import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
 import Control.Monad.Trans.Maybe
 
-import Debug.Trace
+--import Debug.Trace
 
 import qualified Data.Map as H
 import qualified Data.Set as S
@@ -30,6 +27,7 @@ import World
 import Physics
 import Render
 
+main :: IO ()
 main = play displayMode white 60
     initialWorld
     (runReader renderWorld)
@@ -43,32 +41,24 @@ main = play displayMode white 60
 --The block coordinate system uses integers, but falling pieces can be at
 --    intermediate positions.
 --Need to establish exactly what our units are.
+--Dry out the terrible huge list in predictcollision
 
+displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
+initialPlayer :: Player
 initialPlayer = undefined
+initialWorld :: World
 initialWorld = World (H.singleton (BlockKey (1,-3)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer
 
 asState :: Reader s a -> State s a
-asState reader = runReader reader <$> get
+asState rdr = runReader rdr <$> get
 
 stepWorld :: Time -> World -> World
 stepWorld dt = execState (stepWorld' dt)
 
 stepWorld' :: Time -> State World ()
-stepWorld' dt = do
-    Player movementStatus <- use player
-    case movementStatus of
-        Standing blockKey xOffset vx ax-> undefined
-            --Check if you're going to run off the block
-            --If you do, either support you with a new block or transition to falling
-        Jumping pt vel jumpAccel -> undefined
-            --Decrease the upward acceleration, but keep accelerating up
-            --CrapCrapCrap I made this cubic
-        Falling pt vel-> undefined
-            --Check for collisions
-        NewlyFalling pt vel timeLeft -> undefined
-            --Permit jumping in this state, but otherwise fall.
+stepWorld' dt = undefined
 
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
@@ -81,16 +71,15 @@ handleEvent _ = id
 handleBlockClick :: BlockKey -> State World ()
 handleBlockClick key  = do
     blockVal <- use $ blocks.at key
-    cycleBlock (key,blockVal)
+    case blockVal of
+        Nothing -> do
+            cci <- popCci 0
+            addBlock (key,BlockVal Normal cci)
+        Just (BlockVal Normal cci) -> do
+            cCons.at cci %= fmap (+1)
+            assign (blocks.at key) $ Just $ BlockVal Bedrock cci
+        Just (BlockVal Bedrock cci) -> void $ removeBlock key
     setForces
-    where cycleBlock :: (BlockKey,Maybe BlockVal) -> State World ()
-          cycleBlock (key,Nothing) = do
-              cci <- popCci 0
-              addBlock (key,BlockVal Normal cci)
-          cycleBlock (key,Just (BlockVal Normal cci)) = do
-              cCons.at cci %= fmap (+1)
-              assign (blocks.at key) $ Just $ BlockVal Bedrock cci
-          cycleBlock (key,Just (BlockVal Bedrock cci)) = void $ removeBlock key
 
 handleLinkClick :: LinkKey -> State World ()
 handleLinkClick linkKey = do
@@ -221,7 +210,7 @@ setForces = do
             Just cc <- use $ cCons.at blockCCi 
             return (blockType==Bedrock,cc)
         ) =<< use blocks
-    let blockForces = const g <$> H.filter (
+    let blockForces = const fg <$> H.filter (
             \ (isBedrock,nGroundings) ->
                 not isBedrock && nGroundings > 0
             )blocksGrounded
@@ -231,3 +220,10 @@ setForces = do
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
         in links.at linkKey%= fmap updateLink) $ H.toList forces
+
+startJump :: Player -> Player
+startJump (Player (Standing (BlockKey (x,y)) xOffset vx _)) =
+    Player $ Jumping (fromIntegral x + xOffset,fromIntegral y) (vx,vJump) g 
+startJump (Player (NewlyFalling (x,y) (vx,vy) _)) = 
+    Player $ Jumping (x,y) (vx,vJump+vy) g
+startJump plr = plr
