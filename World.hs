@@ -46,6 +46,7 @@ module World
 , atMulti
 , possibleLinks
 , playerTrajectory
+, playerLoc
 ) where
 
 import Graphics.Gloss.Interface.Pure.Game
@@ -68,6 +69,8 @@ jumpJerk :: Float
 jumpJerk = -5
 vJump :: Float
 vJump = 5
+vRunMax :: Float
+vRunMax = 5
 
 
 type IntPt = (Int,Int)
@@ -108,12 +111,12 @@ type CConVal = Int
 type CCon = (CConKey,CConVal)
 type CConMap = Map CConKey CConVal
 
-newtype Player = Player {_playerMovement :: PlayerMovement} --Will have other things later
+newtype Player = Player {_playerMovement :: PlayerMovement} deriving (Show) --Will have other things later
 
 data PlayerMovement = Standing BlockKey Float Float Float| 
                       Jumping Point Velocity Float | --Jerk is implicit, accel does not include gravity
                       Falling Point Velocity |
-                      NewlyFalling Point Velocity Float
+                      NewlyFalling Point Velocity Float deriving (Show)
 
 data World = World {_blocks :: BlockMap,
                     _links :: LinkMap,
@@ -161,7 +164,6 @@ possibleLinks (BlockKey (x,y)) = H.fromList
                                   (DnDir, (BlockKey (x,y-1),Link D2U (x  ,y-1))),
                                   (UpDir, (BlockKey (x,y+1),Link D2U (x  ,y  )))]
 
-
 playerVel :: Functor f => (Velocity -> f Velocity) -> PlayerMovement -> f PlayerMovement
 playerVel f (Standing support xOffset vx ax) =
     (\ (vx',_) -> Standing support xOffset vx' ax) <$> f (vx,0)
@@ -169,14 +171,22 @@ playerVel f (Jumping pt v ay) = (\ v' -> Jumping pt v' ay) <$> f v
 playerVel f (Falling pt v) = (\ v' -> Falling pt v') <$> f v
 playerVel f (NewlyFalling pt v t) = (\ v' -> NewlyFalling pt v' t) <$> f v
 
+playerLoc :: Getter PlayerMovement Point
+playerLoc = to _playerLoc
+_playerLoc :: PlayerMovement -> Point
+_playerLoc (Standing (BlockKey (x,y)) xOffset _ _) =(fromIntegral x+xOffset,fromIntegral y+(1+playerHeight)/2)
+_playerLoc (Jumping pt _ _) = pt
+_playerLoc (Falling pt _) = pt
+_playerLoc (NewlyFalling pt _ _) = pt
+
 playerWidth :: Float
 playerWidth = 0.4
 playerHeight :: Float
 playerHeight = 0.8
 
 playerTrajectory :: PlayerMovement -> Trajectory
-playerTrajectory (Standing (BlockKey (x,y)) xOffset vx ax) =
-        Parabola (fromIntegral x+xOffset,fromIntegral y+playerHeight/2) (vx,0) 0
+playerTrajectory mov@(Standing (BlockKey (x,y)) xOffset vx ax) =
+        RunTrajectory (mov^.playerLoc) vx ax vRunMax
 playerTrajectory (Jumping (x,y) (vx,vy) ay) =
     JumpTrajectory (x,y) (vx,vy) ay g jumpJerk
 playerTrajectory (Falling (x,y) (vx,vy)) =

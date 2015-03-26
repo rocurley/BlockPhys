@@ -36,6 +36,9 @@ main = play displayMode white 60
  
 --TODO:
 
+--This works: cabal run --ghc-options="-osuf p_o -prof -auto -auto-all"
+--Normal cabal run does not.
+
 --There's a bug in the block connection code.
 --Need to reset stress to 0 when a group is ungrounded.
 --The block coordinate system uses integers, but falling pieces can be at
@@ -46,9 +49,9 @@ main = play displayMode white 60
 displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 initialPlayer :: Player
-initialPlayer = undefined
+initialPlayer = Player $ Standing (BlockKey (0,0)) 0 0.7 0
 initialWorld :: World
-initialWorld = World (H.singleton (BlockKey (1,-3)) (BlockVal Bedrock 0))
+initialWorld = World (H.singleton (BlockKey (2,0)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer
 
 asState :: Reader s a -> State s a
@@ -58,7 +61,8 @@ stepWorld :: Time -> World -> World
 stepWorld dt = execState (stepWorld' dt)
 
 stepWorld' :: Time -> State World ()
-stepWorld' dt = undefined
+stepWorld' dt = do
+    get >>= (player.playerMovement $ asState . timeEvolvePlayerMovement dt) >>= put
 
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do

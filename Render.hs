@@ -36,24 +36,17 @@ renderWorld = do
     blockPictures  <- fmap Pictures $ mapM renderBlock =<< view (blocks.to H.keys)
     stressPictures <- fmap Pictures $ mapM renderBlockStress =<< view (blocks.to H.keys)
     linkPictures   <- Pictures <$> map renderLink <$> H.toList <$> view links
+    playerPicture  <- renderPlayer <$> view (player.playerMovement.playerLoc)
+    futurePlayers <- traverse (\ t ->
+            view player >>= playerMovement (timeEvolvePlayerMovement t)
+        ) [1,2,3,4,5]
+    let playerFuturePictures = Pictures $ renderPlayer <$> traceShowId 
+            ((^.playerMovement.playerLoc) <$> futurePlayers)
     let debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
-    let testTrajectory = JumpTrajectory (-1,-1) (1,0) (3) (-1) (-5)
-    let trajectoryPicture = renderTrajectory 280 280 testTrajectory
-    let playerPts = Pictures [renderPlayer $ traceShowId $ startPoint $ atT testTrajectory x | x<- [2.527882]]
-    playerCollision <- predictCollision testTrajectory 5
     let grid = Scale scaleFactor scaleFactor $ Pictures $
             [Line [(x,-3),(x,3)]|x<-[-3..3]] ++ [Line [(-3,y),(3,y)]|y<-[-3..3]]
-    return $ Pictures $ [grid,blockPictures,linkPictures,stressPictures,trajectoryPicture] ++
-        case playerCollision of
-            Nothing -> [] 
-            Just (Collision (x,y) t (BlockKey (xi,yi)) direction) -> let
-                linkPicture = case direction of
-                    UpDir -> renderLink (Link D2U (xi,yi),OffLink)
-                    DnDir -> renderLink (Link D2U (xi,yi-1),OffLink)
-                    LfDir -> renderLink (Link L2R (xi-1,yi),OffLink)
-                    RtDir -> renderLink (Link L2R (xi,yi),OffLink)
-                in [renderPlayer (x,y),linkPicture]
+    return $ Pictures $ [grid,blockPictures,linkPictures,stressPictures,playerPicture,playerFuturePictures]
 
 renderBlock :: BlockKey -> Reader World Picture
 renderBlock blockKey@(BlockKey (xi,yi)) = do
@@ -146,5 +139,5 @@ renderTrajectory xLim _ trajectory =
         x0f = x0*scaleFactor
         yOfX x = scaleFactor * snd (startPoint $ atT trajectory $ (x/scaleFactor-x0)/vx)
 renderPlayer :: Point -> Picture
-renderPlayer (x,y) = Scale scaleFactor scaleFactor $ Translate x y $
+renderPlayer (x,y) = traceShow (x,y) $ Scale scaleFactor scaleFactor $ Translate x y $
     Polygon [(0.2,0.4),(-0.2,0.4),(-0.2,-0.4),(0.2,-0.4)]
