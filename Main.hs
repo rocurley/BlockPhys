@@ -58,7 +58,19 @@ stepWorld :: Time -> World -> World
 stepWorld dt = execState (stepWorld' dt)
 
 stepWorld' :: Time -> State World ()
-stepWorld' dt = undefined
+stepWorld' dt = do
+    Player movementStatus <- use player
+    case movementStatus of
+        Standing blockKey xOffset vx ax-> undefined
+            --Check if you're going to run off the block
+            --If you do, either support you with a new block or transition to falling
+        Jumping pt vel jumpAccel -> undefined
+            --Decrease the upward acceleration, but keep accelerating up
+            --CrapCrapCrap I made this cubic
+        Falling pt vel-> undefined
+            --Check for collisions
+        NewlyFalling pt vel timeLeft -> undefined
+            --Permit jumping in this state, but otherwise fall.
 
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
@@ -210,7 +222,7 @@ setForces = do
             Just cc <- use $ cCons.at blockCCi 
             return (blockType==Bedrock,cc)
         ) =<< use blocks
-    let blockForces = const fg <$> H.filter (
+    let blockForces = const g <$> H.filter (
             \ (isBedrock,nGroundings) ->
                 not isBedrock && nGroundings > 0
             )blocksGrounded
@@ -220,10 +232,3 @@ setForces = do
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
         in links.at linkKey%= fmap updateLink) $ H.toList forces
-
-startJump :: Player -> Player
-startJump (Player (Standing (BlockKey (x,y)) xOffset vx _)) =
-    Player $ Jumping (fromIntegral x + xOffset,fromIntegral y) (vx,vJump) g 
-startJump (Player (NewlyFalling (x,y) (vx,vy) _)) = 
-    Player $ Jumping (x,y) (vx,vJump+vy) g
-startJump plr = plr
