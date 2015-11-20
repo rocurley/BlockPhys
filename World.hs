@@ -3,6 +3,9 @@
 module World
 ( scaleFactor
 , blockSize
+, g
+, jumpJerk
+, vJump
 , Velocity
 , Trajectory(..)
 , IntPt

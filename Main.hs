@@ -46,9 +46,9 @@ main = play displayMode white 60
 displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 initialPlayer :: Player
-initialPlayer = undefined
+initialPlayer = Player $ Standing (BlockKey (0,0)) 0 0.7 0
 initialWorld :: World
-initialWorld = World (H.singleton (BlockKey (1,-3)) (BlockVal Bedrock 0))
+initialWorld = World (H.singleton (BlockKey (2,0)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer
 
 asState :: Reader s a -> State s a
@@ -58,19 +58,7 @@ stepWorld :: Time -> World -> World
 stepWorld dt = execState (stepWorld' dt)
 
 stepWorld' :: Time -> State World ()
-stepWorld' dt = do
-    Player movementStatus <- use player
-    case movementStatus of
-        Standing blockKey xOffset vx ax-> undefined
-            --Check if you're going to run off the block
-            --If you do, either support you with a new block or transition to falling
-        Jumping pt vel jumpAccel -> undefined
-            --Decrease the upward acceleration, but keep accelerating up
-            --CrapCrapCrap I made this cubic
-        Falling pt vel-> undefined
-            --Check for collisions
-        NewlyFalling pt vel timeLeft -> undefined
-            --Permit jumping in this state, but otherwise fall.
+stepWorld' dt = undefined
 
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
@@ -222,7 +210,7 @@ setForces = do
             Just cc <- use $ cCons.at blockCCi 
             return (blockType==Bedrock,cc)
         ) =<< use blocks
-    let blockForces = const g <$> H.filter (
+    let blockForces = const fg <$> H.filter (
             \ (isBedrock,nGroundings) ->
                 not isBedrock && nGroundings > 0
             )blocksGrounded
@@ -232,3 +220,10 @@ setForces = do
         updateLink OffLink = OffLink
         updateLink (OnLink _) = OnLink force
         in links.at linkKey%= fmap updateLink) $ H.toList forces
+
+startJump :: Player -> Player
+startJump (Player (Standing (BlockKey (x,y)) xOffset vx _)) =
+    Player $ Jumping (fromIntegral x + xOffset,fromIntegral y) (vx,vJump) g
+startJump (Player (NewlyFalling (x,y) (vx,vy) _)) = 
+    Player $ Jumping (x,y) (vx,vJump+vy) g
+startJump plr = plr

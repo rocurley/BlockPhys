@@ -2,7 +2,7 @@
 
 module Physics
 ( solveForces
-, g
+, fg
 , Stress(..)
 , Time
 , stressFromLinks
@@ -108,8 +108,8 @@ solveForces externalForces activeLinks = let
         Left err -> error $ show err
     in H.fromList $ zip activeLinks $ unfoldr expandForcesList (V.toList forcesVector)
 
-g :: Force
-g = Force (-1) 0 0
+fg :: Force
+fg = Force (-1) 0 0
 
 newtype Stress = Stress (L 2 2) deriving (Show)
 instance Monoid Stress where
@@ -140,6 +140,7 @@ blockStress key = do
 
 startPoint :: Trajectory -> Point
 startPoint (Parabola pt _ _) = pt
+startPoint (RunTrajectory pt _ _ _) = pt
 startPoint (JumpTrajectory pt _ _ _ _) = pt
 
 atT :: Trajectory -> Time -> Trajectory
@@ -168,6 +169,7 @@ xint :: Float -> Trajectory -> [(Point,Time)]
 xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) =
     -- 0 = 1/2*ay*t^2 + vy*t + (y-lineY)
     [(startPoint $ atT trajectory t,t)|t <- solveQuadratic (1/2*ay) vy (y-lineY)]
+xint lineY (RunTrajectory{}) = []
 xint lineY (JumpTrajectory (x,y) (vx,vy) aJump aG 0) =
     xint lineY $ Parabola (x,y) (vx,vy) (aJump+aG)
 xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) = let
@@ -180,6 +182,16 @@ xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) = let
     in collisionsDuringJump++collisionsAfterJump
 
 yint :: Float -> Trajectory -> [(Point,Time)]
+yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax) = let
+    signedVmax = vmax*signum ax 
+    tMaxSpeed = (vmax -vx)/ax
+    tsPreMax = filter (< tMaxSpeed) $ solveQuadratic ax vx (x-lineX)
+    RunTrajectory (x',_) vx' _ _ = atT trajectory tMaxSpeed
+    tPostMax = tMaxSpeed + (lineX-x')/vx'
+    ts = if tPostMax >= tMaxSpeed
+         then tPostMax:tsPreMax
+         else tsPreMax
+    in [(startPoint $ atT trajectory t, t)|t<-ts]
 yint lineX trajectory = let
     t = case trajectory of
         Parabola (x,_) (vx,_) _ -> (lineX-x)/vx
@@ -188,6 +200,7 @@ yint lineX trajectory = let
 
 criticalPoints :: Trajectory -> [Time]
 criticalPoints (Parabola _ (_,vy) ay) =[-vy/ay]
+criticalPoints (RunTrajectory _ vx ax _) = [-vx/ax]
 criticalPoints trajectory@(JumpTrajectory _ (_,vy) aJump aG jerk) = let
     tJumpEnd = -aJump/jerk
     --1/2*jerk*t^2 + (aG+aJump)*t + vy =0
