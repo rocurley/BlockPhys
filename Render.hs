@@ -37,6 +37,7 @@ renderWorld = do
     stressPictures <- fmap Pictures $ mapM renderBlockStress =<< view (blocks.to H.keys)
     linkPictures   <- Pictures <$> map renderLink <$> H.toList <$> view links
     playerPicture  <- renderPlayer <$> view (player.playerMovement.playerLoc)
+    --This causes the crash.
     futurePlayers <- traverse (\ t ->
             view player >>= playerMovement (timeEvolvePlayerMovement t)
         ) [1,2,3,4,5]
