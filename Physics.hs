@@ -125,7 +125,7 @@ stressFromLinks = foldMap toStress where
     toStress  :: (Direction, LinkVal) -> Stress
     toStress (_, OffLink) = mempty
     toStress (direction, OnLink (Force up right rotCCW)) =
-        let (upMat,rightMat,rotCCWMat) = case direction of 
+        let (upMat,rightMat,rotCCWMat) = case direction of
                 UpDir -> (matrix [0,0,0,1],matrix [0,1,0,0],matrix [0,1,0,0])
                 DnDir -> (matrix [0,0,0,1],matrix [0,1,0,0],matrix [0,-1,0,0])
                 RtDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,-1,0])
@@ -165,15 +165,15 @@ naiveAtT (RunTrajectory (x,y) vx ax vmax) t = let
         in RunTrajectory (x',y) vx' ax vmax
 
 atT :: Trajectory -> Time -> Trajectory
-atT trajectory@(Parabola{}) t = naiveAtT trajectory t 
+atT trajectory@(Parabola{}) t = naiveAtT trajectory t
 atT trajectory@(RunTrajectory _ vx ax vmax) t = let
-    signedVmax = vmax*signum ax 
+    signedVmax = vmax*signum ax
     tMaxSpeed = (vmax -vx)/ax
     in case (compare t tMaxSpeed) of
         GT -> let
             RunTrajectory pt vx' _ vmax' = naiveAtT trajectory tMaxSpeed
             in naiveAtT (RunTrajectory pt vx' 0 vmax') (t-tMaxSpeed)
-        EQ -> let 
+        EQ -> let
             RunTrajectory pt vx' _ vmax' = naiveAtT trajectory tMaxSpeed
             in RunTrajectory pt vx' 0 vmax'
         LT -> naiveAtT trajectory t
@@ -184,7 +184,7 @@ atT trajectory@(JumpTrajectory _ _ aJump _ jerk) t = let
         GT -> let
             JumpTrajectory pt v _ aG _ = naiveAtT trajectory tJumpEnd
             in atT (Parabola pt v aG) (t-tJumpEnd)
-        EQ -> let 
+        EQ -> let
             JumpTrajectory pt v _ aG _ = naiveAtT trajectory tJumpEnd
             in Parabola pt v aG
         LT -> naiveAtT trajectory t
@@ -208,7 +208,7 @@ xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) = let
 
 yint :: Float -> Trajectory -> [(Point,Time)]
 yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax) = let
-    signedVmax = vmax*signum ax 
+    signedVmax = vmax*signum ax
     tMaxSpeed = (vmax -vx)/ax
     tsPreMax = filter (< tMaxSpeed) $ solveQuadratic ax vx (x-lineX)
     RunTrajectory (x',_) vx' _ _ = atT trajectory tMaxSpeed
@@ -224,7 +224,9 @@ yint lineX trajectory = let
     in [(startPoint $ atT trajectory t, t)]
 
 criticalPoints :: Trajectory -> [Time]
+criticalPoints (Parabola _ (_,vy) 0) =[]
 criticalPoints (Parabola _ (_,vy) ay) =[-vy/ay]
+criticalPoints (RunTrajectory _ vx 0 _) = []
 criticalPoints (RunTrajectory _ vx ax _) = [-vx/ax]
 criticalPoints trajectory@(JumpTrajectory _ (_,vy) aJump aG jerk) = let
     tJumpEnd = -aJump/jerk
@@ -255,7 +257,7 @@ predictCollision trajectory dt = do
 
     --Annother option, slightly more principled: Improve the root finding algorithm such
     --that the root is as exact as floats permit while still being on the "right side".
-    --This would probably prevent 
+    --This would probably prevent
     let collisions = do --List monad
             block@(BlockKey (xBlockInt,yBlockInt)) <- blocksInBox
             let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
@@ -332,7 +334,7 @@ timeEvolvePlayerMovement t mov = do
                             else Falling pt vel
                     Jumping _ _ _ -> let
                         JumpTrajectory _ _ aJump _ _ = trajectoryAtCollision
-                        in Jumping pt (0,snd vel) aJump 
+                        in Jumping pt (0,snd vel) aJump
 
 
 bisect :: (Float -> Float) -> Float -> Float -> Float
