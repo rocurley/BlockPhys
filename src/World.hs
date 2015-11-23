@@ -51,11 +51,7 @@ import Graphics.Gloss.Interface.Pure.Game
 
 import qualified Data.Map as H hiding (Map)
 import Data.Map (Map)
-import Control.Applicative
 import Control.Lens
-import Control.Monad.State.Strict hiding (mapM,mapM_)
-import Data.Monoid
-import Data.Foldable
 import Test.QuickCheck.Arbitrary
 import Test.QuickCheck.Gen
 

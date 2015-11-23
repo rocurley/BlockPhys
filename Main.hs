@@ -5,26 +5,19 @@ import Prelude hiding (foldr,foldl,mapM,mapM_,sequence,concatMap)
 
 import Graphics.Gloss.Interface.Pure.Game
 
-import Data.Foldable
 import Data.Fixed
-import Data.Traversable
 import Data.Maybe
 
-import Control.Applicative
-import Control.Monad hiding (mapM,mapM_)
 import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
-import Control.Monad.Trans.Maybe
 
 --import Debug.Trace
 
 import qualified Data.Map as H
-import qualified Data.Set as S
 
 import Control.Lens
 
 import World
-import Physics
 import Render
 import Waldo
 import Utils
