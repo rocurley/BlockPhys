@@ -40,8 +40,6 @@ module World
 , player
 , Direction(..)
 , force0
-, popCci
-, pushCci
 , linkedBlocks
 , atMulti
 , possibleLinks
@@ -137,16 +135,6 @@ makeLenses ''World
 makeLenses ''BlockVal
 makeLenses ''BlockKey
 makeLenses ''Player
-
-popCci :: CConVal -> State World Int
-popCci grounded = do
-    i:is <- use cCis
-    cCis.=is
-    cCons%=H.insert i grounded
-    return i
-
-pushCci :: Int -> State World ()
-pushCci i = cCis%=(i:)
 
 linkedBlocks :: LinkKey -> (BlockKey,BlockKey)
 linkedBlocks (Link L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))

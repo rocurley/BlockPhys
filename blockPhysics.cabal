@@ -19,7 +19,9 @@ library
   hs-source-dirs:      src
   exposed-modules:     Physics,
                        Render,
-                       World
+                       World,
+                       Waldo,
+                       Utils
   default-extensions:  FlexibleContexts
   build-depends:       base >=4.7 && < 5,
                        gloss,
