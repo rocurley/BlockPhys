@@ -12,6 +12,7 @@ module Physics
 , startPoint
 , atT
 , trajectoryBox
+, criticalPoints
 , predictCollision
 , timeEvolvePlayerMovement) where
 
