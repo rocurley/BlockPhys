@@ -10,6 +10,7 @@ module Physics
 , Trajectory(..)
 , Collision(..)
 , startPoint
+, naiveAtT
 , atT
 , trajectoryBox
 , criticalPoints
@@ -170,7 +171,9 @@ atT :: Trajectory -> Time -> Trajectory
 atT trajectory@(Parabola{}) t = naiveAtT trajectory t
 atT trajectory@(RunTrajectory _ vx ax vmax) t = let
     signedVmax = vmax*signum ax
-    tMaxSpeed = (vmax -vx)/ax
+    tMaxSpeed = case ax of
+      0 -> infinity
+      _ -> (vmax -vx)/ax
     in case (compare t tMaxSpeed) of
         GT -> let
             RunTrajectory pt vx' _ vmax' = naiveAtT trajectory tMaxSpeed
@@ -181,7 +184,9 @@ atT trajectory@(RunTrajectory _ vx ax vmax) t = let
         LT -> naiveAtT trajectory t
 
 atT trajectory@(JumpTrajectory _ _ aJump _ jerk) t = let
-    tJumpEnd = -aJump/jerk
+    tJumpEnd = case jerk of
+      0 -> infinity
+      _ -> -aJump/jerk
     in case (compare t tJumpEnd) of
         GT -> let
             JumpTrajectory pt v _ aG _ = naiveAtT trajectory tJumpEnd
