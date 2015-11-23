@@ -33,11 +33,8 @@ main = play displayMode white 60
     (runReader renderWorld)
     handleEvent
     (const id) --stepWorld
- 
---TODO:
 
---This works: cabal run --ghc-options="-osuf p_o -prof -auto -auto-all"
---Normal cabal run does not.
+--TODO:
 
 --There's a bug in the block connection code.
 --Need to reset stress to 0 when a group is ungrounded.
@@ -67,7 +64,7 @@ stepWorld' dt = do
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
     linkClicked <- asState $ linkClickCheck pt
-    case linkClicked of 
+    case linkClicked of
         Just linkKey -> handleLinkClick linkKey
         Nothing -> handleBlockClick (BlockKey $ roundToIntPoint pt)
 handleEvent _ = id
@@ -112,7 +109,7 @@ linkOn :: LinkKey -> Force -> State World Bool
 linkOn linkKey force = fmap isJust $ runMaybeT $ do
     linkVal <- MaybeT $ use $ links.at linkKey
     let (blockA,blockB) = linkedBlocks linkKey
-    BlockVal _ cciA <- MaybeT $ use $ blocks.at blockA 
+    BlockVal _ cciA <- MaybeT $ use $ blocks.at blockA
     BlockVal _ cciB <- MaybeT $ use $ blocks.at blockB
     aGrounded <- MaybeT $ use $ cCons.at cciA
     (connectedToB,bGrounded) <- lift $ asState $ subgraph blockB
@@ -135,10 +132,10 @@ linkClickCheck (x,y) = let
                  then Just linkKey
                  else Nothing
     in case (compare u 0,compare v 0) of
-        (LT,LT) -> linkTester (xrem,yrem)   $ Link L2R (xi,yi) 
-        (LT,GT) -> linkTester (yrem,xrem)   $ Link D2U (xi,yi) 
-        (GT,LT) -> linkTester (yrem,1-xrem) $ Link D2U (xi+1,yi) 
-        (GT,GT) -> linkTester (xrem,1-yrem) $ Link L2R (xi,yi+1) 
+        (LT,LT) -> linkTester (xrem,yrem)   $ Link L2R (xi,yi)
+        (LT,GT) -> linkTester (yrem,xrem)   $ Link D2U (xi,yi)
+        (GT,LT) -> linkTester (yrem,1-xrem) $ Link D2U (xi+1,yi)
+        (GT,GT) -> linkTester (xrem,1-yrem) $ Link L2R (xi,yi+1)
         _ -> return Nothing -- Nothing on the boundary
 
 inDiamond :: Point -> Bool
@@ -181,7 +178,7 @@ subgraph blockKey = dfs [blockKey] (S.empty,0) where
         block <- view $ blocks.at blockKey
         case block of
             Just (BlockVal Bedrock _) -> return 1
-            Just (BlockVal _ _) -> return 0 
+            Just (BlockVal _ _) -> return 0
             Nothing -> error "blockKey not found in blockMap"
     dfs :: [BlockKey] -> (S.Set BlockKey,Int) -> Reader World (S.Set BlockKey,Int)
     dfs [] out = return out
@@ -211,7 +208,7 @@ setForces :: State World ()
 setForces = do
     blocksGrounded <- traverse (
         \ (BlockVal blockType blockCCi) -> do
-            Just cc <- use $ cCons.at blockCCi 
+            Just cc <- use $ cCons.at blockCCi
             return (blockType==Bedrock,cc)
         ) =<< use blocks
     let blockForces = const fg <$> H.filter (
@@ -227,7 +224,7 @@ setForces = do
 
 startJump :: Player -> Player
 startJump (Player (Standing (BlockKey (x,y)) xOffset vx _)) =
-    Player $ Jumping (fromIntegral x + xOffset,fromIntegral y) (vx,vJump) g 
-startJump (Player (NewlyFalling (x,y) (vx,vy) _)) = 
+    Player $ Jumping (fromIntegral x + xOffset,fromIntegral y) (vx,vJump) g
+startJump (Player (NewlyFalling (x,y) (vx,vy) _)) =
     Player $ Jumping (x,y) (vx,vJump+vy) g
 startJump plr = plr

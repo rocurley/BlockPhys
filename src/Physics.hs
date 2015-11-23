@@ -11,6 +11,7 @@ module Physics
 , Collision(..)
 , startPoint
 , atT
+, trajectoryBox
 , predictCollision
 , timeEvolvePlayerMovement) where
 

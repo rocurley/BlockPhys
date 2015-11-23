@@ -58,6 +58,8 @@ import Control.Lens
 import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Data.Monoid
 import Data.Foldable
+import Test.QuickCheck.Arbitrary
+import Test.QuickCheck.Gen
 
 scaleFactor :: Float
 scaleFactor = 80
@@ -81,6 +83,13 @@ type Velocity = (Float,Float)
 data Trajectory = Parabola Point Velocity Float |
                   RunTrajectory Point Float Float Float |
                   JumpTrajectory Point Velocity Float Float Float deriving (Show,Eq,Ord)
+instance Arbitrary Trajectory where
+  arbitrary = do
+    n <- choose (0 :: Int ,2)
+    case n of
+      0 -> Parabola <$> arbitrary <*> arbitrary <*> arbitrary
+      1 -> RunTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary
+      2 -> JumpTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary  <*> arbitrary
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 newtype BlockKey = BlockKey {_blockLoc :: IntPt} deriving (Eq,Ord,Show)
@@ -113,7 +122,7 @@ type CConMap = Map CConKey CConVal
 
 newtype Player = Player {_playerMovement :: PlayerMovement} deriving (Show) --Will have other things later
 
-data PlayerMovement = Standing BlockKey Float Float Float| 
+data PlayerMovement = Standing BlockKey Float Float Float|
                       Jumping Point Velocity Float | --Jerk is implicit, accel does not include gravity
                       Falling Point Velocity |
                       NewlyFalling Point Velocity Float deriving (Show)
@@ -158,7 +167,7 @@ mapSet k (Just v) = H.insert k v
 mapSet k Nothing = H.delete k
 
 possibleLinks :: BlockKey -> Map Direction (BlockKey,LinkKey)
-possibleLinks (BlockKey (x,y)) = H.fromList 
+possibleLinks (BlockKey (x,y)) = H.fromList
                                  [(RtDir, (BlockKey (x+1,y),Link L2R (x  ,y  ))),
                                   (LfDir, (BlockKey (x-1,y),Link L2R (x-1,y  ))),
                                   (DnDir, (BlockKey (x,y-1),Link D2U (x  ,y-1))),
