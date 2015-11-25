@@ -196,7 +196,6 @@ atT trajectory@(JumpTrajectory _ _ aJump _ jerk) t = let
             in Parabola pt v aG
         LT -> naiveAtT trajectory t
 
-
 xint :: Float -> Trajectory -> [(Point,Time)]
 xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) =
     -- 0 = 1/2*ay*t^2 + vy*t + (y-lineY)
@@ -224,10 +223,11 @@ yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax) = let
          then tPostMax:tsPreMax
          else tsPreMax
     in [(startPoint $ atT trajectory t, t)|t<-ts]
-yint lineX trajectory = let
-    t = case trajectory of
-        Parabola (x,_) (vx,_) _ -> (lineX-x)/vx
-        JumpTrajectory (x,_) (vx,_) _ _ _ -> (lineX-x)/vx
+yint lineX trajectory@(Parabola (x,_) (vx,_) _) = let
+    t = (lineX-x)/vx
+    in [(startPoint $ atT trajectory t, t)]
+yint lineX trajectory@(JumpTrajectory (x,_) (vx,_) _ _ _) = let
+    t = (lineX-x)/vx
     in [(startPoint $ atT trajectory t, t)]
 
 criticalPoints :: Trajectory -> [Time]
@@ -322,24 +322,25 @@ timeEvolvePlayerMovement t mov = do
                     _  -> Falling pt vel
                 _ -> Falling pt vel
             JumpTrajectory pt vel aJump _ _ -> Jumping pt vel aJump
+            RunTrajectory (x,y) vx ax _ -> let
+              (x',y') = (round x, round y)
+             in Standing (BlockKey (x', y')) (x - fromIntegral x') vx ax
         Just (Collision pt tCollide blockKey@(BlockKey (blockX,blockY)) direction) -> let
             trajectoryAtCollision = atT trajectory tCollide
-            vel = startVelocity trajectoryAtCollision
+            vel@(vx, vy) = startVelocity trajectoryAtCollision
             in timeEvolvePlayerMovement (t-tCollide) $ case direction of
                 --No more jumping if you hit your head
-                DnDir -> Falling pt (fst $ vel,0)
-                UpDir -> Standing blockKey (fst pt - fromIntegral blockX) (fst vel) 0
+                DnDir -> Falling pt (vx ,0)
+                UpDir -> Standing blockKey (fst pt - fromIntegral blockX) vx 0
                 _ -> case mov of
-                    Falling{} -> Falling pt vel
+                    Falling{} -> Falling pt (0, vy)
                     NewlyFalling _ _ jumpTimeLeft -> let
                         newJumpTimeLeft = jumpTimeLeft-tCollide
                         in
                             if newJumpTimeLeft > 0
-                            then NewlyFalling pt vel newJumpTimeLeft
-                            else Falling pt vel
-                    Jumping _ _ _ -> let
-                        JumpTrajectory _ _ aJump _ _ = trajectoryAtCollision
-                        in Jumping pt (0,snd vel) aJump
+                            then NewlyFalling pt (0, vy) newJumpTimeLeft
+                            else Falling pt (0, vy)
+                    _ -> trajectoryMovement trajectoryAtCollision
 
 
 bisect :: (Float -> Float) -> Float -> Float -> Float

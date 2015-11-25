@@ -8,6 +8,8 @@ import Graphics.Gloss.Interface.Pure.Game
 import Data.Fixed
 import Data.Maybe
 
+import Data.Foldable
+
 import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
 
@@ -41,7 +43,8 @@ main = play displayMode white 60
 displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 initialPlayer :: Player
-initialPlayer = Player $ Standing (BlockKey (0,0)) 0 0.7 0
+--initialPlayer = Player $ Falling (0,0) (2,5)
+initialPlayer = Player {_playerMovement = Jumping (0.0,0.0) (-4.5771146,43.063477) (-9.874197)}
 initialWorld :: World
 initialWorld = World (H.singleton (BlockKey (2,0)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer

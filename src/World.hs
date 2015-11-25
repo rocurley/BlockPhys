@@ -44,6 +44,7 @@ module World
 , atMulti
 , possibleLinks
 , playerTrajectory
+, trajectoryMovement
 , playerLoc
 ) where
 
@@ -115,11 +116,21 @@ type CCon = (CConKey,CConVal)
 type CConMap = Map CConKey CConVal
 
 newtype Player = Player {_playerMovement :: PlayerMovement} deriving (Show) --Will have other things later
+instance Arbitrary Player where
+  arbitrary = Player <$> arbitrary
 
-data PlayerMovement = Standing BlockKey Float Float Float|
+data PlayerMovement = Standing BlockKey Float Float Float |
                       Jumping Point Velocity Float | --Jerk is implicit, accel does not include gravity
                       Falling Point Velocity |
                       NewlyFalling Point Velocity Float deriving (Show)
+instance Arbitrary PlayerMovement where
+  --This is bad and I should feel bad.
+  arbitrary = do
+    n <- choose (0 :: Int ,2)
+    case n of
+      0 -> Jumping (0,0) <$> arbitrary <*> arbitrary
+      1 -> Falling (0,0) <$> arbitrary
+      2 -> NewlyFalling (0,0) <$> arbitrary <*> arbitrary
 
 data World = World {_blocks :: BlockMap,
                     _links :: LinkMap,
@@ -186,3 +197,11 @@ playerTrajectory (Falling (x,y) (vx,vy)) =
     Parabola (x,y) (vx,vy) g
 playerTrajectory (NewlyFalling (x,y) (vx,vy) timeleft) =
     Parabola (x,y) (vx,vy) g
+
+trajectoryMovement :: Trajectory -> PlayerMovement
+trajectoryMovement (RunTrajectory (x, y) vx ax _) = let
+  (xi, yi) = (round x, round y)
+  in Standing (BlockKey (xi, yi)) (x - fromIntegral xi) vx ax
+trajectoryMovement (JumpTrajectory pt v ay _ _) =
+  Jumping pt v ay
+trajectoryMovement Parabola{} = error "Cannot distinguish falling and newly falling"
