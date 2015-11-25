@@ -278,11 +278,9 @@ predictCollision trajectory dt = do
                 (yint (xBlock - xTouchDist) trajectory,
                     \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, LfDir)]
             ((collisionX,collisionY),collisionT) <- potentialCollisions
-            traceShow ((collisionX,collisionY),collisionT) $
-                traceShow (atT trajectory collisionT) $
-                if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
-                then [Collision (collisionX,collisionY) collisionT block direction]
-                else []
+            if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
+              then [Collision (collisionX,collisionY) collisionT block direction]
+              else []
     return $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) collisions
 
 --Passing the player as an argument instead of from the world makes
