@@ -36,13 +36,11 @@ renderWorld = do
     blockPictures  <- fmap Pictures $ mapM renderBlock =<< view (blocks.to H.keys)
     stressPictures <- fmap Pictures $ mapM renderBlockStress =<< view (blocks.to H.keys)
     linkPictures   <- Pictures <$> map renderLink <$> H.toList <$> view links
-    playerPicture  <- renderPlayer <$> view (player.playerMovement.playerLoc)
-    --This causes the crash.
+    playerPicture  <- renderPlayer <$> view player
     futurePlayers <- traverse (\ t ->
             view player >>= playerMovement (timeEvolvePlayerMovement t)
-        ) [1,2,3,4,5]
-    let playerFuturePictures = Pictures $ renderPlayer <$> traceShowId 
-            ((^.playerMovement.playerLoc) <$> futurePlayers)
+        ) [0.2,0.4..5]
+    let playerFuturePictures = Pictures $ renderPlayer <$> futurePlayers
     let debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
     let grid = Scale scaleFactor scaleFactor $ Pictures $
@@ -139,6 +137,13 @@ renderTrajectory xLim _ trajectory =
             JumpTrajectory (x0',_) (vx',_) _ _ _ -> (x0', vx')
         x0f = x0*scaleFactor
         yOfX x = scaleFactor * snd (startPoint $ atT trajectory $ (x/scaleFactor-x0)/vx)
-renderPlayer :: Point -> Picture
-renderPlayer (x,y) = traceShow (x,y) $ Scale scaleFactor scaleFactor $ Translate x y $
-    Polygon [(0.2,0.4),(-0.2,0.4),(-0.2,-0.4),(0.2,-0.4)]
+renderPlayer :: Player -> Picture
+renderPlayer player = let
+  color = withAlpha 0.2 $ case player^.playerMovement of
+            Standing{} -> green
+            Jumping{} -> red
+            Falling{} -> blue
+            NewlyFalling{} -> orange
+  (x,y) = player^.playerMovement.playerLoc
+  playerShape = Polygon [(0.2,0.4),(-0.2,0.4),(-0.2,-0.4),(0.2,-0.4)]
+  in Color color $ Scale scaleFactor scaleFactor $ Translate x y playerShape
