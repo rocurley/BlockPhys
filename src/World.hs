@@ -204,4 +204,6 @@ trajectoryMovement (RunTrajectory (x, y) vx ax _) = let
   in Standing (BlockKey (xi, yi)) (x - fromIntegral xi) vx ax
 trajectoryMovement (JumpTrajectory pt v ay _ _) =
   Jumping pt v ay
-trajectoryMovement Parabola{} = error "Cannot distinguish falling and newly falling"
+--Note that this should maybe be NewlyFalling: you need to be careful here.
+trajectoryMovement (Parabola pt vel _) =
+  Falling pt vel

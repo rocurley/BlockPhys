@@ -39,7 +39,7 @@ renderWorld = do
     playerPicture  <- renderPlayer <$> view player
     futurePlayers <- traverse (\ t ->
             view player >>= playerMovement (timeEvolvePlayerMovement t)
-        ) [0.2,0.4..5]
+        ) [0.1,0.2..5]
     let playerFuturePictures = Pictures $ renderPlayer <$> futurePlayers
     let debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]

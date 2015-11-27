@@ -40,3 +40,4 @@ spec = do
         ((xMin,xMax), (yMin,yMax)) = trajectoryBox trajectory tMax
         (x,y) = startPoint $ atT trajectory tEval
         in (xMin <= x) && (x <= xMax) && (yMin <= y) && (y <= yMax)
+  --TODO: Add test that object is actually colliding when the collision is predicted.
