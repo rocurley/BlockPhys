@@ -224,7 +224,6 @@ yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax)
   |vx > vmax = trace "clamping vx" $ traceShow (vx, vmax) $ yint lineX $ RunTrajectory (x,y) vmax 0 vmax
   |otherwise = let
     signedVmax = vmax*signum ax
-    --THIS IS SCREWING ME UP!
     tMaxSpeed = trace "ax" $ traceShow ax $ trace "tMaxSpeed" $ traceShowId $ (vmax -vx)/ax
     tsPreMax = filter (< tMaxSpeed) $ solveQuadratic ax vx (x-lineX)
     RunTrajectory (x',_) vx' _ _ = trace "max speed trajectory" $ traceShowId $ atT trajectory tMaxSpeed

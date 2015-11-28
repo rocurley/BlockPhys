@@ -43,8 +43,8 @@ main = play displayMode white 60
 displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 initialPlayer :: Player
-initialPlayer = Player $ Standing (BlockKey (-3,0)) 0 5 0
---initialPlayer = Player $ Jumping (0.0,0.0) (-6.512229,5.373562) 4.4866576
+--initialPlayer = Player $ Standing (BlockKey (-3,0)) 0 5 0
+initialPlayer = Player $ Falling (1.0,0.6733333) (1.0,0.59999996)
 initialWorld :: World
 initialWorld = World (H.singleton (BlockKey (-3,0)) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer
