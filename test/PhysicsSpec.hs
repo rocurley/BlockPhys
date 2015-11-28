@@ -46,6 +46,12 @@ spec = do
   describe "Physics.atT" $ do
     it "should always give finite results" $
       property $ \ trajectory t -> trajectoryIsFinite $ atT trajectory t
+    it "should be the identity when t=0" $
+      property $ \ trajectory -> trajectory == atT trajectory 0
+    it "should be divisible" $
+      property $ \ trajectory t1' t2' -> let
+            (t1, t2) = (abs t1', abs t2')
+            in trajectoryFuzzyEquality (atT trajectory (t1+t2)) (atT (atT trajectory t1) t2)
   describe "Physics.criticalPoints" $ do
     it "should always give finite results" $
       property $ all isFinite . criticalPoints
@@ -63,3 +69,4 @@ spec = do
         in (xMin <= x) && (x <= xMax) && (yMin <= y) && (y <= yMax)
   --TODO: Add test that object is actually colliding when the collision is predicted.
   --TODO: Add test that time evolving in 2 parts is the same as in 1 part.
+  --TODO: Add parity symmetry test.
