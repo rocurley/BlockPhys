@@ -83,7 +83,7 @@ instance Arbitrary Trajectory where
     n <- choose (0 :: Int ,2)
     case n of
       0 -> Parabola <$> arbitrary <*> arbitrary <*> arbitrary
-      1 -> RunTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary
+      1 -> RunTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> fmap abs arbitrary
       2 -> JumpTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary  <*> arbitrary
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)

@@ -172,12 +172,13 @@ naiveAtT (RunTrajectory (x,y) vx ax vmax) t = let
 atT :: Trajectory -> Time -> Trajectory
 atT trajectory@(Parabola{}) t = naiveAtT trajectory t
 atT trajectory@(RunTrajectory pt vx ax vmax) t
+  | vmax < 0 = error  $ "vmax must not be negative: vmax = " ++ show vmax
   | abs vx > abs vmax = atT (RunTrajectory pt (signum vx * abs vmax) ax vmax) t
   | otherwise = let
     signedVmax = vmax*signum ax
     tMaxSpeed = case ax of
       0 -> infinity
-      _ -> (signedVmax -vx)/ax
+      _ -> (signedVmax - vx)/ax
     in case (compare t tMaxSpeed) of
         GT -> let
             RunTrajectory pt vx' _ vmax' = naiveAtT trajectory tMaxSpeed
