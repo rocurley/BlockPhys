@@ -188,19 +188,24 @@ atT trajectory@(RunTrajectory pt vx ax vmax) t
             in RunTrajectory pt vx' 0 vmax'
         LT -> naiveAtT trajectory t
 
-atT trajectory@(JumpTrajectory _ _ aJump _ jerk) t = let
-    tJumpEnd = case (jerk, signum $ aJump*jerk) of
-      (0, _) -> infinity
-      (_, 1) -> infinity
-      _ -> -aJump/jerk
-    in case (compare t tJumpEnd) of
-        GT -> let
-            JumpTrajectory pt v _ aG _ = naiveAtT trajectory tJumpEnd
-            in atT (Parabola pt v aG) (t-tJumpEnd)
-        EQ -> let
-            JumpTrajectory pt v _ aG _ = naiveAtT trajectory tJumpEnd
-            in Parabola pt v aG
-        LT -> naiveAtT trajectory t
+atT trajectory@(JumpTrajectory _ _ aJump _ jerk) t =
+  case jumpEndTime aJump jerk of
+    Nothing -> naiveAtT trajectory t
+    Just tJumpEnd -> case (compare t tJumpEnd) of
+      GT -> let
+              JumpTrajectory pt v _ aG _ = naiveAtT trajectory tJumpEnd
+              in atT (Parabola pt v aG) (t-tJumpEnd)
+      EQ -> let
+              JumpTrajectory pt v _ aG _ = naiveAtT trajectory tJumpEnd
+              in Parabola pt v aG
+      LT -> naiveAtT trajectory t
+
+jumpEndTime :: Float -> Float -> Maybe Time
+jumpEndTime _ 0 = Nothing
+jumpEndTime aJump jerk = case compare (aJump*jerk) 0 of
+                           EQ -> Just 0
+                           GT -> Nothing
+                           LT -> Just $ -aJump/jerk
 
 xint :: Float -> Trajectory -> [(Point,Time)]
 xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) =
@@ -240,18 +245,21 @@ yint lineX trajectory@(JumpTrajectory (x,_) (vx,_) _ _ _) = let
     t = (lineX-x)/vx
     in [(startPoint $ atT trajectory t, t)]
 
+--Note that this doesn't nessecarily get critical points in the past.
 criticalPoints :: Trajectory -> [Time]
 criticalPoints (Parabola _ (_,vy) 0) =[]
 criticalPoints (Parabola _ (_,vy) ay) =[-vy/ay]
 criticalPoints (RunTrajectory _ vx 0 _) = []
 criticalPoints (RunTrajectory _ vx ax _) = [-vx/ax]
-criticalPoints trajectory@(JumpTrajectory _ (_,vy) aJump aG jerk) = let
-    tJumpEnd = -aJump/jerk
+criticalPoints trajectory@(JumpTrajectory _ (_,vy) aJump aG jerk) =
+  case jumpEndTime aJump jerk of
     --1/2*jerk*t^2 + (aG+aJump)*t + vy =0
-    criticalPointsDuringJump = filter (<tJumpEnd) $ solveQuadratic (1/2*jerk) (aG+aJump) vy
-    postJumpTrajectory = atT trajectory tJumpEnd
-    criticalPointsAfterJump = [t+tJumpEnd|t<- criticalPoints postJumpTrajectory]
-    in criticalPointsDuringJump ++ criticalPointsAfterJump
+    Nothing -> solveQuadratic (1/2*jerk) (aG+aJump) vy
+    Just tJumpEnd -> let
+      criticalPointsDuringJump = filter (<tJumpEnd) $ solveQuadratic (1/2*jerk) (aG+aJump) vy
+      postJumpTrajectory = atT trajectory tJumpEnd
+      criticalPointsAfterJump = [t+tJumpEnd|t <- criticalPoints postJumpTrajectory]
+      in criticalPointsDuringJump ++ criticalPointsAfterJump
 
 trajectoryBox :: Trajectory -> Time -> ((Float,Float),(Float,Float))
 trajectoryBox trajectory dt = let
