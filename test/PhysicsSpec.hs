@@ -54,46 +54,41 @@ spec = do
     it "should be the identity when t=0" $
       property $ \ trajectory -> trajectory == naiveAtT trajectory 0
     it "should be divisible" $
-      property $ \ trajectory t1' t2' -> let
-        (t1, t2) = (abs t1', abs t2')
-        in trajectoryFuzzyEquality (naiveAtT trajectory (t1+t2)) (naiveAtT (naiveAtT trajectory t1) t2)
+      property $ \ trajectory t1 t2 -> t1 >= 0 && t2 >= 0 ==>
+        trajectoryFuzzyEquality (naiveAtT trajectory (t1+t2)) (naiveAtT (naiveAtT trajectory t1) t2)
     it "should be x-parity invariant" $
-      property $ \ trajectory t' -> let
-        t = abs t'
-        in paritySwapX (naiveAtT trajectory t) == naiveAtT (paritySwapX trajectory) t
+      property $ \ trajectory t -> t >= 0 ==>
+        paritySwapX (naiveAtT trajectory t) == naiveAtT (paritySwapX trajectory) t
     it "should be y-parity invariant" $
-      property $ \ trajectory t' -> let
-        t = abs t'
-        in paritySwapY (naiveAtT trajectory t) == naiveAtT (paritySwapY trajectory) t
+      property $ \ trajectory t -> t >= 0 ==>
+        paritySwapY (naiveAtT trajectory t) == naiveAtT (paritySwapY trajectory) t
   describe "Physics.atT" $ do
     it "should always give finite results" $
       property $ \ trajectory t -> trajectoryIsFinite $ atT trajectory t
+    it "should not modify the start location when t=0" $
+      property $ \ trajectory -> startPoint (atT trajectory 0) == startPoint trajectory
     it "should be the idempotent when t=0" $
       property $ \ trajectory -> atT trajectory 0 == atT (atT trajectory 0) 0
     it "should be divisible" $
-      property $ \ trajectory t1' t2' -> let
-            (t1, t2) = (abs t1', abs t2')
-            in trajectoryFuzzyEquality (atT trajectory (t1+t2)) (atT (atT trajectory t1) t2)
+      property $ \ trajectory t1 t2 -> t1 >= 0 && t2 >= 0 ==>
+        trajectoryFuzzyEquality (atT trajectory (t1+t2)) (atT (atT trajectory t1) t2)
     it "should be x-parity invariant" $
-      property $ \ trajectory t' -> let
-        t = abs t'
-        in paritySwapX (atT trajectory t) == atT (paritySwapX trajectory) t
+      property $ \ trajectory t -> t >= 0 ==>
+        paritySwapX (atT trajectory t) == atT (paritySwapX trajectory) t
     it "should be y-parity invariant" $
-      property $ \ trajectory t' -> let
-        t = abs t'
-        in paritySwapY (atT trajectory t) == atT (paritySwapY trajectory) t
+      property $ \ trajectory t -> t >= 0 ==>
+        paritySwapY (atT trajectory t) == atT (paritySwapY trajectory) t
+    -- Add translational symmetry
   describe "Physics.criticalPoints" $ do
     it "should always give finite results" $
       property $ all isFinite . criticalPoints
   describe "Physics.trajectoryBox" $ do
     it "should always give finite results" $
-      property $ \ trajectory t -> let
-        ((xMin, yMin), (xMax, yMax)) = trajectoryBox trajectory (abs t)
+      property $ \ trajectory t -> t >= 0 ==> let
+        ((xMin, yMin), (xMax, yMax)) = trajectoryBox trajectory t
         in all isFinite [xMin, yMin, xMax, yMax]
     it "should always contain a point within the time window" $
-      property $ \ trajectory t1 t2 -> let
-        tEval = min (abs t1) (abs t2)
-        tMax = max (abs t1) (abs t2)
+      property $ \ trajectory tEval tMax -> tMax >= tEval && tEval >= 0 ==> let
         ((xMin,xMax), (yMin,yMax)) = trajectoryBox trajectory tMax
         (x,y) = startPoint $ atT trajectory tEval
         in (xMin <= x) && (x <= xMax) && (yMin <= y) && (y <= yMax)
