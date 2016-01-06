@@ -227,12 +227,12 @@ yint :: Float -> Trajectory -> [(Point,Time)]
 yint lineX trajectory@(RunTrajectory (x,y) 0 0 vmax) = []
 yint lineX trajectory@(RunTrajectory (x,y) vx 0 vmax) = [((lineX,y), (lineX - x)/vx)]
 yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax)
-  |vx > vmax = trace "clamping vx" $ traceShow (vx, vmax) $ yint lineX $ RunTrajectory (x,y) vmax 0 vmax
+  |vx > vmax = yint lineX $ RunTrajectory (x,y) vmax 0 vmax
   |otherwise = let
     signedVmax = vmax*signum ax
-    tMaxSpeed = trace "ax" $ traceShow ax $ trace "tMaxSpeed" $ traceShowId $ (vmax -vx)/ax
+    tMaxSpeed = (vmax -vx)/ax
     tsPreMax = filter (< tMaxSpeed) $ solveQuadratic ax vx (x-lineX)
-    RunTrajectory (x',_) vx' _ _ = trace "max speed trajectory" $ traceShowId $ atT trajectory tMaxSpeed
+    RunTrajectory (x',_) vx' _ _ = atT trajectory tMaxSpeed
     tPostMax = tMaxSpeed + (lineX-x')/vx'
     ts = if tPostMax >= tMaxSpeed
          then tPostMax:tsPreMax
@@ -305,20 +305,11 @@ predictCollision trajectory dt = do
 
 timeEvolvePlayerMovementNoCollision :: Time -> PlayerMovement -> PlayerMovement
 timeEvolvePlayerMovementNoCollision t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) = let
-    (x,y) = (fromIntegral xInt,fromIntegral yInt)
     trajectory = playerTrajectory mov
-    runOffTime = minimumMay $ filter (>= 0) $ map snd $
-        yint (x+(1+playerWidth)/2) trajectory ++ yint (x-(1+playerWidth)/2) trajectory
-    patchTime = maybe t (min t) runOffTime
-    newTrajectory@(RunTrajectory (x',y') vx' ax' _) = atT trajectory patchTime
+    newTrajectory@(RunTrajectory (x',y') vx' ax' _) = atT trajectory t
     newXInt = round x'
-    newBlockKey = BlockKey (newXInt,y)
-    in if t > patchTime
-        then --Ran onto a new block
-            timeEvolvePlayerMovementNoCollision (t-patchTime) $
-                Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
-        else --Still on the initial block
-            Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
+    newBlockKey = BlockKey (newXInt,yInt)
+    in Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
 timeEvolvePlayerMovementNoCollision t mov = let
     trajectory = playerTrajectory mov
     in case atT trajectory t of
@@ -329,7 +320,7 @@ timeEvolvePlayerMovementNoCollision t mov = let
           _ -> Falling pt vel
       JumpTrajectory pt vel aJump _ _ -> Jumping pt vel aJump
       RunTrajectory (x,y) vx ax _ -> let
-        (x',y') = (round x, round y)
+        (x',y') = (round x, round $ y + (playerHeight + 1)/2)
         in Standing (BlockKey (x', y')) (x - fromIntegral x') vx ax
 
 --Passing the player as an argument instead of from the world makes
@@ -361,37 +352,24 @@ timeEvolvePlayerMovement t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) =
         Just (Collision (x',_) _ _ _) -> --Ran into something
             return $ Standing (BlockKey (xInt,yInt)) (x'-x) vx ax
 timeEvolvePlayerMovement t mov = do
-    let trajectory = trace "Trajectory:" $ traceShowId $ playerTrajectory mov
+    let trajectory = playerTrajectory mov
     collision <- predictCollision trajectory t
     case collision of
-        Nothing -> trace "No collision" $ return $ case atT trajectory t of
-            Parabola pt vel _ -> case mov of
-                NewlyFalling _ _ jumpTimeLeft -> case compare jumpTimeLeft t of
-                    GT -> NewlyFalling pt vel (jumpTimeLeft - t)
-                    _  -> Falling pt vel
-                _ -> Falling pt vel
-            JumpTrajectory pt vel aJump _ _ -> Jumping pt vel aJump
-            RunTrajectory (x,y) vx ax _ -> let
-              (x',y') = (round x, round y)
-             in Standing (BlockKey (x', y')) (x - fromIntegral x') vx ax
+        Nothing -> return $ timeEvolvePlayerMovementNoCollision t mov
         Just collision@(Collision pt tCollide blockKey@(BlockKey (blockX,blockY)) direction) ->
-          trace "Got a collision:" $ traceShow collision $ let
-            trajectoryAtCollision = atT trajectory tCollide
-            vel@(vx, vy) = startVelocity trajectoryAtCollision
+          let
+            movAtCollision = timeEvolvePlayerMovementNoCollision t mov
+            trajectoryAtCollision = playerTrajectory movAtCollision
+            (vx, vy) = startVelocity trajectoryAtCollision
             in timeEvolvePlayerMovement (t-tCollide) $ case direction of
                 --No more jumping if you hit your head
                 DnDir -> Falling pt (vx ,0)
                 UpDir -> Standing blockKey (fst pt - fromIntegral blockX) vx 0
-                _ -> case mov of
-                    Falling{} -> Falling pt (0, vy)
-                    NewlyFalling _ _ jumpTimeLeft -> let
-                        newJumpTimeLeft = jumpTimeLeft-tCollide
-                        in
-                            if newJumpTimeLeft > 0
-                            then NewlyFalling pt (0, vy) newJumpTimeLeft
-                            else Falling pt (0, vy)
-                    Standing{} -> error "Standing trajectory after that should have been guarded out."
-
+                _ -> case timeEvolvePlayerMovementNoCollision t mov of
+                       Standing{} -> error "Standing was supposed to have been guarded off"
+                       Jumping _ _ aJump -> Jumping pt (0, vy) aJump
+                       Falling{} -> Falling pt (0, vy)
+                       NewlyFalling _ _ jumpTime -> NewlyFalling pt (0, vy) jumpTime
 
 bisect :: (Float -> Float) -> Float -> Float -> Float
 bisect f xLow xHigh = let
