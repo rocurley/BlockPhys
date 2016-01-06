@@ -283,23 +283,54 @@ predictCollision trajectory dt = do
     --Annother option, slightly more principled: Improve the root finding algorithm such
     --that the root is as exact as floats permit while still being on the "right side".
     --This would probably prevent
-    let collisions = do --List monad
-            block@(BlockKey (xBlockInt,yBlockInt)) <- blocksInBox
-            let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
-            (potentialCollisions,collisionChecker,direction) <- [
-                (xint (yBlock + yTouchDist) trajectory,
-                    \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, UpDir),
-                (xint (yBlock - yTouchDist) trajectory,
-                    \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, DnDir),
-                (yint (xBlock + xTouchDist) trajectory,
-                    \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, RtDir),
-                (yint (xBlock - xTouchDist) trajectory,
-                    \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, LfDir)]
-            ((collisionX,collisionY),collisionT) <- potentialCollisions
-            if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
-              then [Collision (collisionX,collisionY) collisionT block direction]
-              else []
+    let
+      collisions :: [Collision]
+      collisions = do
+        block@(BlockKey (xBlockInt,yBlockInt)) <- blocksInBox
+        let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
+        (potentialCollisions,collisionChecker,direction) <- [
+            (xint (yBlock + yTouchDist) trajectory,
+                \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, UpDir),
+            (xint (yBlock - yTouchDist) trajectory,
+                \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, DnDir),
+            (yint (xBlock + xTouchDist) trajectory,
+                \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, RtDir),
+            (yint (xBlock - xTouchDist) trajectory,
+                \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, LfDir)]
+        ((collisionX,collisionY),collisionT) <- potentialCollisions
+        if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
+          then [Collision (collisionX,collisionY) collisionT block direction]
+          else []
     return $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) collisions
+
+timeEvolvePlayerMovementNoCollision :: Time -> PlayerMovement -> PlayerMovement
+timeEvolvePlayerMovementNoCollision t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) = let
+    (x,y) = (fromIntegral xInt,fromIntegral yInt)
+    trajectory = playerTrajectory mov
+    runOffTime = minimumMay $ filter (>= 0) $ map snd $
+        yint (x+(1+playerWidth)/2) trajectory ++ yint (x-(1+playerWidth)/2) trajectory
+    patchTime = maybe t (min t) runOffTime
+    newTrajectory@(RunTrajectory (x',y') vx' ax' _) = atT trajectory patchTime
+    newXInt = round x'
+    newBlockKey = BlockKey (newXInt,y)
+    in if t > patchTime
+        then --Ran onto a new block
+            timeEvolvePlayerMovementNoCollision (t-patchTime) $
+                Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
+        else --Still on the initial block
+            Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
+timeEvolvePlayerMovementNoCollision t mov = let
+    trajectory = playerTrajectory mov
+    in case atT trajectory t of
+      Parabola pt vel _ -> case mov of
+          NewlyFalling _ _ jumpTimeLeft -> case compare jumpTimeLeft t of
+              GT -> NewlyFalling pt vel (jumpTimeLeft - t)
+              _  -> Falling pt vel
+          _ -> Falling pt vel
+      JumpTrajectory pt vel aJump _ _ -> Jumping pt vel aJump
+      RunTrajectory (x,y) vx ax _ -> let
+        (x',y') = (round x, round y)
+        in Standing (BlockKey (x', y')) (x - fromIntegral x') vx ax
 
 --Passing the player as an argument instead of from the world makes
 --it much easier to define recursively.
@@ -330,10 +361,10 @@ timeEvolvePlayerMovement t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) =
         Just (Collision (x',_) _ _ _) -> --Ran into something
             return $ Standing (BlockKey (xInt,yInt)) (x'-x) vx ax
 timeEvolvePlayerMovement t mov = do
-    let trajectory = playerTrajectory mov
+    let trajectory = trace "Trajectory:" $ traceShowId $ playerTrajectory mov
     collision <- predictCollision trajectory t
     case collision of
-        Nothing -> return $ case atT trajectory t of
+        Nothing -> trace "No collision" $ return $ case atT trajectory t of
             Parabola pt vel _ -> case mov of
                 NewlyFalling _ _ jumpTimeLeft -> case compare jumpTimeLeft t of
                     GT -> NewlyFalling pt vel (jumpTimeLeft - t)
@@ -343,7 +374,8 @@ timeEvolvePlayerMovement t mov = do
             RunTrajectory (x,y) vx ax _ -> let
               (x',y') = (round x, round y)
              in Standing (BlockKey (x', y')) (x - fromIntegral x') vx ax
-        Just (Collision pt tCollide blockKey@(BlockKey (blockX,blockY)) direction) -> let
+        Just collision@(Collision pt tCollide blockKey@(BlockKey (blockX,blockY)) direction) ->
+          trace "Got a collision:" $ traceShow collision $ let
             trajectoryAtCollision = atT trajectory tCollide
             vel@(vx, vy) = startVelocity trajectoryAtCollision
             in timeEvolvePlayerMovement (t-tCollide) $ case direction of
@@ -358,7 +390,7 @@ timeEvolvePlayerMovement t mov = do
                             if newJumpTimeLeft > 0
                             then NewlyFalling pt (0, vy) newJumpTimeLeft
                             else Falling pt (0, vy)
-                    _ -> trajectoryMovement trajectoryAtCollision
+                    Standing{} -> error "Standing trajectory after that should have been guarded out."
 
 
 bisect :: (Float -> Float) -> Float -> Float -> Float
