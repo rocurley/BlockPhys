@@ -21,7 +21,7 @@ main = hspec spec
 spec :: Spec
 spec = do
   describe "Players" $ do
-    it "should stay in a box" $ property $ \ plr t -> let
+    it "should stay in a box" $ within (10^5) $ property $ \ plr t -> let
       addJail = execState $ do
         traverse_ cycleBlock [BlockKey ( x,-3) | x <- [-3..3]]
         traverse_ cycleBlock [BlockKey ( x, 3) | x <- [-3..3]]

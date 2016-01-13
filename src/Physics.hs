@@ -14,6 +14,7 @@ module Physics
 , atT
 , trajectoryBox
 , criticalPoints
+, jumpEndTime
 , yint
 , xint
 , predictCollision
@@ -34,6 +35,7 @@ import Numeric.LinearAlgebra.Static as SLA
 import qualified Foreign.Storable (Storable)
 import Numeric.IEEE
 
+import Data.Maybe
 import Data.List hiding (foldr,foldl,foldl',minimum,maximum)
 import Control.Monad hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
@@ -214,14 +216,17 @@ xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) =
 xint lineY (RunTrajectory{}) = []
 xint lineY (JumpTrajectory (x,y) (vx,vy) aJump aG 0) =
     xint lineY $ Parabola (x,y) (vx,vy) (aJump+aG)
-xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) = let
+xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) =
     -- 0 = 1/6*jerk*t^3+1/2*(aJump+aG)*t^2 + vy*t + (y-lineY)
-    tJumpEnd = -aJump/jerk
-    collisionsDuringJump = [(startPoint $ atT trajectory  t,t)|
-        t <- solveCubic (1/6*jerk) (1/2*(aJump+aG)) vy (y-lineY), t<tJumpEnd]
-    postJumpTrajectory = atT trajectory tJumpEnd
-    collisionsAfterJump = [(pt,t+tJumpEnd)|(pt,t) <- xint lineY postJumpTrajectory]
-    in collisionsDuringJump++collisionsAfterJump
+    case jumpEndTime aJump jerk of
+      Nothing -> [(startPoint $ atT trajectory  t,t) |
+            t <- solveCubic (1/6*jerk) (1/2*(aJump+aG)) vy (y-lineY), t > 0]
+      Just tJumpEnd -> let
+        collisionsDuringJump = [(startPoint $ atT trajectory  t,t) |
+            t <- solveCubic (1/6*jerk) (1/2*(aJump+aG)) vy (y-lineY), t<tJumpEnd, t > 0]
+        postJumpTrajectory = atT trajectory tJumpEnd
+        collisionsAfterJump = [(pt,t+tJumpEnd) | (pt,t) <- xint lineY postJumpTrajectory, t > 0]
+        in collisionsDuringJump++collisionsAfterJump
 
 yint :: Float -> Trajectory -> [(Point,Time)]
 yint lineX trajectory@(RunTrajectory (x,y) 0 0 vmax) = []
@@ -238,9 +243,11 @@ yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax)
          then tPostMax:tsPreMax
          else tsPreMax
     in [(startPoint $ atT trajectory t, t)|t<-ts]
+yint lineX trajectory@(Parabola (_,_) (0,_) _) = []
 yint lineX trajectory@(Parabola (x,_) (vx,_) _) = let
     t = (lineX-x)/vx
     in [(startPoint $ atT trajectory t, t)]
+yint lineX trajectory@(JumpTrajectory (_,_) (0,_) _ _ _) = []
 yint lineX trajectory@(JumpTrajectory (x,_) (vx,_) _ _ _) = let
     t = (lineX-x)/vx
     in [(startPoint $ atT trajectory t, t)]
