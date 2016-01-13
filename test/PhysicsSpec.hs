@@ -81,10 +81,10 @@ spec = do
     -- Add translational symmetry
   describe "Physics.xint" $ do
     it "should agree with atT about the collision location" $
-      property $ \ y trajectory -> all (\ (pt,t) -> pt == startPoint (atT trajectory t)) $ xint y trajectory
+      property $ \ y trajectory -> and [pt == startPoint (atT trajectory t)| (pt, t) <- xint y trajectory, t>=0]
   describe "Physics.yint" $ do
     it "should agree with atT about the collision location" $
-      property $ \ x trajectory -> all (\ (pt,t) -> pt == startPoint (atT trajectory t)) $ yint x trajectory
+      property $ \ x trajectory -> and [pt == startPoint (atT trajectory t)| (pt, t) <- yint x trajectory, t>=0]
   describe "Physics.criticalPoints" $ do
     it "should always give finite results" $
       within (10^5) $ property $ all isFinite . criticalPoints
