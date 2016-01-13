@@ -79,9 +79,15 @@ spec = do
       property $ \ trajectory t -> t >= 0 ==>
         paritySwapY (atT trajectory t) == atT (paritySwapY trajectory) t
     -- Add translational symmetry
+  describe "Physics.xint" $ do
+    it "should agree with atT about the collision location" $
+      property $ \ y trajectory -> all (\ (pt,t) -> pt == startPoint (atT trajectory t)) $ xint y trajectory
+  describe "Physics.yint" $ do
+    it "should agree with atT about the collision location" $
+      property $ \ x trajectory -> all (\ (pt,t) -> pt == startPoint (atT trajectory t)) $ yint x trajectory
   describe "Physics.criticalPoints" $ do
     it "should always give finite results" $
-      property $ all isFinite . criticalPoints
+      within (10^5) $ property $ all isFinite . criticalPoints
   describe "Physics.trajectoryBox" $ do
     it "should always give finite results" $
       property $ \ trajectory t -> t >= 0 ==> let
