@@ -307,7 +307,7 @@ predictCollision trajectory dt = do
             [Collision (cx,cy) ct blockKey DnDir |
                 ((cx, cy), ct) <- xint (yBlock - yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
             [Collision (cx,cy) ct blockKey RtDir |
-                ((cx, cy), ct) <- yint (yBlock + xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist],
+                ((cx, cy), ct) <- yint (xBlock + xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist],
             [Collision (cx,cy) ct blockKey LfDir |
                 ((cx, cy), ct) <- yint (xBlock - xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist]]
         guard (dt > ct && ct > 0)
