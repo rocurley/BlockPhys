@@ -26,6 +26,8 @@ import Control.Monad.Reader hiding (mapM,mapM_)
 
 import qualified Data.Map as H
 
+import qualified Map2D
+
 import Control.Lens
 
 import Physics
@@ -33,8 +35,8 @@ import World
 
 renderWorld :: Reader World Picture
 renderWorld = do
-    blockPictures  <- fmap Pictures $ mapM renderBlock =<< view (blocks.to H.keys)
-    stressPictures <- fmap Pictures $ mapM renderBlockStress =<< view (blocks.to H.keys)
+    blockPictures  <- fmap Pictures $ mapM renderBlock =<< view (blocks.to Map2D.keys)
+    stressPictures <- fmap Pictures $ mapM renderBlockStress =<< view (blocks.to Map2D.keys)
     linkPictures   <- Pictures <$> map renderLink <$> H.toList <$> view links
     playerPicture  <- renderPlayer <$> view player
     futurePlayers <- traverse (\ t ->
@@ -47,8 +49,8 @@ renderWorld = do
             [Line [(x,-3),(x,3)]|x<-[-3..3]] ++ [Line [(-3,y),(3,y)]|y<-[-3..3]]
     return $ Pictures $ [grid,blockPictures,linkPictures,stressPictures,playerPicture,playerFuturePictures]
 
-renderBlock :: BlockKey -> Reader World Picture
-renderBlock blockKey@(BlockKey (xi,yi)) = do
+renderBlock :: IntPt -> Reader World Picture
+renderBlock blockKey@(xi,yi) = do
     BlockVal blockType cci <- fromJust <$> view (blocks.at blockKey)
     grounded <- (>0) <$> fromJust <$> view (cCons.at cci)
     let (x,y) = (fromIntegral xi, fromIntegral yi)
@@ -64,8 +66,8 @@ renderBlock blockKey@(BlockKey (xi,yi)) = do
     return $ scale scaleFactor scaleFactor $
         translate x y $ box
 
-renderBlockStress :: BlockKey -> Reader World Picture
-renderBlockStress blockKey@(BlockKey (xi,yi)) = do
+renderBlockStress :: IntPt -> Reader World Picture
+renderBlockStress blockKey@(xi,yi) = do
     blockVal <- view $ blocks.at blockKey
     case blockVal of
         Nothing -> error "Trying to render an invalid blockKey"

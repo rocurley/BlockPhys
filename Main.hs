@@ -23,6 +23,7 @@ import World
 import Render
 import Waldo
 import Utils
+import qualified Map2D
 
 main :: IO ()
 main = play displayMode white 60
@@ -44,9 +45,9 @@ displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 initialPlayer :: Player
 --initialPlayer = Player $ Standing (BlockKey (-3,0)) 0 5 0
-initialPlayer = Player $ Falling (1.0,0.6733333) (1.0,0.59999996)
+initialPlayer = Player $ Jumping (0.0,0.0) (7.4241276,2.2388887) (-13.159124)
 initialWorld :: World
-initialWorld = World (H.singleton (BlockKey (-3,0)) (BlockVal Bedrock 0))
+initialWorld = World (Map2D.singleton (-3,0) (BlockVal Bedrock 0))
     H.empty (H.singleton 0 1) [1..] initialPlayer
 
 handleEvent :: Event -> World -> World
@@ -54,7 +55,7 @@ handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
     linkClicked <- asState $ linkClickCheck pt
     case linkClicked of
         Just linkKey -> toggleLink linkKey
-        Nothing -> cycleBlock (BlockKey $ roundToIntPoint pt)
+        Nothing -> cycleBlock (roundToIntPoint pt)
 handleEvent _ = id
 
 linkClickCheck :: Point -> Reader World (Maybe LinkKey)

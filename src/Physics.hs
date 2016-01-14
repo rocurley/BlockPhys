@@ -50,6 +50,8 @@ import Control.Lens
 import Debug.Trace
 
 import World
+import Map2D (Map2D)
+import qualified Map2D as Map2D hiding (Map2D)
 
 --Thanks -Wall.
 (^) :: Num a => a -> Int -> a
@@ -58,10 +60,10 @@ import World
 ident :: (Foreign.Storable.Storable a, Num a) => Int -> LA.Matrix a
 ident n = (n><n) $ cycle $ 1: replicate n 0
 
-linkColBuilder :: LinkKey -> H.Map BlockKey Int -> Int -> (Double, Double, Double)
+linkColBuilder :: LinkKey -> Map2D Int Int Int -> Int -> (Double, Double, Double)
 --Given a link, the block map, and a given block index, gives as a tuple
 --the force that will be applied to that block.
-linkColBuilder linkKey @(Link L2R _) blockMap n
+linkColBuilder linkKey@(Link L2R _) blockMap n
     --force type     u  r cc
     | n == 3*li   =( 1, 0, 0)--up     -|
     | n == 3*li+1 =( 0, 1, 0)--right  -|- affect on left block
@@ -72,8 +74,8 @@ linkColBuilder linkKey @(Link L2R _) blockMap n
     | otherwise   =( 0, 0, 0)
     where
         (l,r) = linkedBlocks linkKey
-        li = H.findWithDefault (-1) l blockMap
-        ri = H.findWithDefault (-1) r blockMap
+        li = Map2D.findWithDefault (-1) l blockMap
+        ri = Map2D.findWithDefault (-1) r blockMap
 linkColBuilder linkKey @(Link D2U _) blockMap n
     --force type     u  r cc
     | n == 3*di   =( 1, 0, 0)--up     -|
@@ -85,10 +87,10 @@ linkColBuilder linkKey @(Link D2U _) blockMap n
     | otherwise   =( 0, 0, 0)
     where
         (d,u) = linkedBlocks linkKey
-        di = H.findWithDefault (-1) d blockMap
-        ui = H.findWithDefault (-1) u blockMap
+        di = Map2D.findWithDefault (-1) d blockMap
+        ui = Map2D.findWithDefault (-1) u blockMap
 
-addLinkCols :: Int -> H.Map BlockKey Int -> LinkKey -> [V.Vector Double] -> [V.Vector Double]
+addLinkCols :: Int -> Map2D Int Int Int -> LinkKey -> [V.Vector Double] -> [V.Vector Double]
 addLinkCols nBlocks blockMap link linkCols =
     V.buildVector (3*nBlocks) ((\ (a,_,_) -> a) . linkColBuilder link blockMap) :
     V.buildVector (3*nBlocks) ((\ (_,b,_) -> b) . linkColBuilder link blockMap) :
@@ -99,13 +101,13 @@ expandForcesList :: [Double] -> Maybe (Force, [Double])
 expandForcesList (u:r:cc:rest) = Just (Force u r cc,rest)
 expandForcesList _ = Nothing
 
-solveForces :: H.Map BlockKey Force -> [LinkKey] -> H.Map LinkKey Force
+solveForces :: Map2D Int Int Force -> [LinkKey] -> H.Map LinkKey Force
 solveForces externalForces activeLinks = let
-    nBlocks    = H.size externalForces :: Int
+    nBlocks    = Map2D.size externalForces :: Int
     nLinks     = length activeLinks
-    blocksList = H.keys externalForces :: [BlockKey]
-    blockMap   = H.fromList $ zip blocksList [0..] :: H.Map BlockKey Int
-    orderedForces = map (externalForces H.!)  blocksList
+    blocksList = Map2D.keys externalForces :: [IntPt]
+    blockMap   = Map2D.fromList $ zip blocksList [0..] :: Map2D Int Int Int
+    orderedForces = map (externalForces Map2D.!)  blocksList
     a = ident $ 3*nLinks
     b = V.fromList $ replicate (3*nLinks) 0
     c = M.fromColumns $ foldr (addLinkCols nBlocks blockMap) [] activeLinks
@@ -139,9 +141,9 @@ stressFromLinks = foldMap toStress where
                 LfDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,1,0])
             in Stress $ konst up*upMat+konst right*rightMat+konst rotCCW*rotCCWMat
 type Time = Float
-data Collision  = Collision Point Time BlockKey Direction deriving (Show,Eq,Ord)
+data Collision  = Collision Point Time IntPt Direction deriving (Show,Eq,Ord)
 
-blockStress :: BlockKey -> Reader World Stress
+blockStress :: IntPt -> Reader World Stress
 blockStress key = do
     maybeLinkVals <- H.toList <$> traverse (\ k -> view (links.at k)) (snd <$> possibleLinks key)
     return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]
@@ -278,10 +280,14 @@ predictCollision :: Trajectory -> Float -> Reader World (Maybe Collision)
 predictCollision trajectory dt = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
     let (xTouchDist,yTouchDist) = ((playerWidth+1)/2,(playerHeight+1)/2)
-    let blockCandidates = [BlockKey (blockX,blockY)|
+    let blockCandidates = [(blockX,blockY)|
             blockX<-[ceiling (xmin-xTouchDist)..floor (xmax+xTouchDist)],
             blockY<-[ceiling (ymin-yTouchDist)..floor (ymax+yTouchDist)]]
-    blocksInBox <- filterM (\ block -> view $ blocks.to (H.member block)) blockCandidates
+    blocksInBox <-
+        Map2D.rangeInc
+          (ceiling $ xmin - xTouchDist, ceiling $ ymin - yTouchDist)
+          (floor $ xmax + xTouchDist, floor $ ymax + yTouchDist)
+        <$> view blocks
     --There's a potential issue where after being stopped by a collision, attempting to
     --move in the same direction will not trigger a collision. If this comes up, it can
     --probably be fixed by adding new collision surfaces slightly within the block,
@@ -293,29 +299,27 @@ predictCollision trajectory dt = do
     let
       collisions :: [Collision]
       collisions = do
-        block@(BlockKey (xBlockInt,yBlockInt)) <- blocksInBox
+        blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
         let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
-        (potentialCollisions,collisionChecker,direction) <- [
-            (xint (yBlock + yTouchDist) trajectory,
-                \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, UpDir),
-            (xint (yBlock - yTouchDist) trajectory,
-                \ collisionX _ -> abs(xBlock-collisionX) < xTouchDist, DnDir),
-            (yint (xBlock + xTouchDist) trajectory,
-                \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, RtDir),
-            (yint (xBlock - xTouchDist) trajectory,
-                \ _ collisionY -> abs(yBlock-collisionY) < yTouchDist, LfDir)]
-        ((collisionX,collisionY),collisionT) <- potentialCollisions
-        if collisionChecker collisionX collisionY && collisionT > 0 && collisionT <dt
-          then [Collision (collisionX,collisionY) collisionT block direction]
-          else []
-    return $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) collisions
+        collision@(Collision _ ct _ _) <- join [
+            [Collision (cx,cy) ct blockKey UpDir |
+                ((cx, cy), ct) <- xint (yBlock + yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
+            [Collision (cx,cy) ct blockKey DnDir |
+                ((cx, cy), ct) <- xint (yBlock - yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
+            [Collision (cx,cy) ct blockKey RtDir |
+                ((cx, cy), ct) <- yint (yBlock + xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist],
+            [Collision (cx,cy) ct blockKey LfDir |
+                ((cx, cy), ct) <- yint (xBlock - xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist]]
+        guard (dt > ct && ct > 0)
+        return collision
+    return $ minimumByMay ({-# SCC "***MINIMUM_THING****" #-} comparing (\ (Collision _ t _ _) -> t)) collisions
 
 timeEvolvePlayerMovementNoCollision :: Time -> PlayerMovement -> PlayerMovement
-timeEvolvePlayerMovementNoCollision t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) = let
+timeEvolvePlayerMovementNoCollision t mov@(Standing (xInt,yInt) xOffset vx ax) = let
     trajectory = playerTrajectory mov
     newTrajectory@(RunTrajectory (x',y') vx' ax' _) = atT trajectory t
     newXInt = round x'
-    newBlockKey = BlockKey (newXInt,yInt)
+    newBlockKey = (newXInt,yInt)
     in Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
 timeEvolvePlayerMovementNoCollision t mov = let
     trajectory = playerTrajectory mov
@@ -328,12 +332,12 @@ timeEvolvePlayerMovementNoCollision t mov = let
       JumpTrajectory pt vel aJump _ _ -> Jumping pt vel aJump
       RunTrajectory (x,y) vx ax _ -> let
         (x',y') = (round x, round $ y + (playerHeight + 1)/2)
-        in Standing (BlockKey (x', y')) (x - fromIntegral x') vx ax
+        in Standing (x', y') (x - fromIntegral x') vx ax
 
 --Passing the player as an argument instead of from the world makes
 --it much easier to define recursively.
 timeEvolvePlayerMovement :: Time -> PlayerMovement -> Reader World PlayerMovement
-timeEvolvePlayerMovement t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) = do
+timeEvolvePlayerMovement t mov@(Standing (xInt,yInt) xOffset vx ax) = do
     let (x,y) = (fromIntegral xInt,fromIntegral yInt)
     let trajectory = playerTrajectory mov
     let runOffTime = minimumMay $ filter (>= 0) $ map snd $
@@ -345,7 +349,7 @@ timeEvolvePlayerMovement t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) =
             let newTrajectory@(RunTrajectory (x',y') vx' ax' _) =
                     atT trajectory patchTime
             let newXInt = round x'
-            let newBlockKey = BlockKey (newXInt,y)
+            let newBlockKey = (newXInt,y)
             newBlockVal <- view $ blocks.at newBlockKey
             case (compare t patchTime,newBlockVal) of
                 (GT,Just _) -> --Ran onto a new block
@@ -357,13 +361,13 @@ timeEvolvePlayerMovement t mov@(Standing (BlockKey (xInt,yInt)) xOffset vx ax) =
                 (_,_) -> --Still on the first block
                     return $ Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
         Just (Collision (x',_) _ _ _) -> --Ran into something
-            return $ Standing (BlockKey (xInt,yInt)) (x'-x) vx ax
+            return $ Standing (xInt,yInt) (x'-x) vx ax
 timeEvolvePlayerMovement t mov = do
     let trajectory = playerTrajectory mov
     collision <- predictCollision trajectory t
     case collision of
         Nothing -> return $ timeEvolvePlayerMovementNoCollision t mov
-        Just collision@(Collision pt tCollide blockKey@(BlockKey (blockX,blockY)) direction) ->
+        Just collision@(Collision pt tCollide blockKey@(blockX,blockY) direction) ->
           let
             movAtCollision = timeEvolvePlayerMovementNoCollision t mov
             trajectoryAtCollision = playerTrajectory movAtCollision

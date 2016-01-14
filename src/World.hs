@@ -10,8 +10,6 @@ module World
 , Trajectory(..)
 , IntPt
 , BlockType(..)
-, BlockKey(..)
-, blockLoc
 , BlockVal(..)
 , blockType
 , cci
@@ -41,7 +39,6 @@ module World
 , Direction(..)
 , force0
 , linkedBlocks
-, atMulti
 , possibleLinks
 , playerTrajectory
 , trajectoryMovement
@@ -55,6 +52,9 @@ import Data.Map (Map)
 import Control.Lens
 import Test.QuickCheck.Arbitrary
 import Test.QuickCheck.Gen
+
+import qualified Map2D as Map2D hiding (Map2D)
+import Map2D (Map2D)
 
 scaleFactor :: Float
 scaleFactor = 80
@@ -87,10 +87,9 @@ instance Arbitrary Trajectory where
       2 -> JumpTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary  <*> arbitrary
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
-newtype BlockKey = BlockKey {_blockLoc :: IntPt} deriving (Eq,Ord,Show)
 data BlockVal = BlockVal {_blockType :: BlockType, _cci :: Int} deriving (Eq,Ord,Show)
-type Block = (BlockKey,BlockVal)
-type BlockMap = Map BlockKey BlockVal
+type Block = (IntPt, BlockVal)
+type BlockMap = Map2D Int Int BlockVal
 
 --I don't like that this can represent invalid states, but the validitiy of a link is
 --pretty much tied to the global state, so I don't think it can be cromulently enforced
@@ -119,7 +118,7 @@ newtype Player = Player {_playerMovement :: PlayerMovement} deriving (Show) --Wi
 instance Arbitrary Player where
   arbitrary = Player <$> arbitrary
 
-data PlayerMovement = Standing BlockKey Float Float Float |
+data PlayerMovement = Standing IntPt Float Float Float |
                       Jumping Point Velocity Float | --Jerk is implicit, accel does not include gravity
                       Falling Point Velocity |
                       NewlyFalling Point Velocity Float deriving (Show)
@@ -140,33 +139,27 @@ data World = World {_blocks :: BlockMap,
 
 makeLenses ''World
 makeLenses ''BlockVal
-makeLenses ''BlockKey
 makeLenses ''Player
 
-linkedBlocks :: LinkKey -> (BlockKey,BlockKey)
-linkedBlocks (Link L2R (x,y)) = (BlockKey (x,y), BlockKey (x+1,y))
-linkedBlocks (Link D2U (x,y)) = (BlockKey (x,y), BlockKey (x,y+1))
+linkedBlocks :: LinkKey -> (IntPt, IntPt)
+linkedBlocks (Link L2R (x,y)) = ((x,y), (x+1,y))
+linkedBlocks (Link D2U (x,y)) = ((x,y), (x,y+1))
 
 newtype AEndo a m = AEndo {appAEndo :: m (a -> a)}
 instance Applicative m => Monoid (AEndo a m) where
         mempty = AEndo $ pure id
         AEndo f `mappend` AEndo g = AEndo $ (.) <$> f <*> g
 
-atMulti :: (Applicative m,Foldable f,Ord k) =>
-    f k -> (Maybe v -> m (Maybe v)) -> Map k v -> m (Map k v)
-atMulti keys f mp = ($ mp) <$> appAEndo (foldMap (AEndo . alter) keys) where
-    alter k = mapSet k <$> f (H.lookup k mp)
-
 mapSet :: Ord k => k -> Maybe v -> Map k v -> Map k v
 mapSet k (Just v) = H.insert k v
 mapSet k Nothing = H.delete k
 
-possibleLinks :: BlockKey -> Map Direction (BlockKey,LinkKey)
-possibleLinks (BlockKey (x,y)) = H.fromList
-                                 [(RtDir, (BlockKey (x+1,y),Link L2R (x  ,y  ))),
-                                  (LfDir, (BlockKey (x-1,y),Link L2R (x-1,y  ))),
-                                  (DnDir, (BlockKey (x,y-1),Link D2U (x  ,y-1))),
-                                  (UpDir, (BlockKey (x,y+1),Link D2U (x  ,y  )))]
+possibleLinks :: IntPt -> Map Direction (IntPt, LinkKey)
+possibleLinks (x,y) = H.fromList
+                                 [(RtDir, ((x+1,y),Link L2R (x  ,y  ))),
+                                  (LfDir, ((x-1,y),Link L2R (x-1,y  ))),
+                                  (DnDir, ((x,y-1),Link D2U (x  ,y-1))),
+                                  (UpDir, ((x,y+1),Link D2U (x  ,y  )))]
 
 playerVel :: Functor f => (Velocity -> f Velocity) -> PlayerMovement -> f PlayerMovement
 playerVel f (Standing support xOffset vx ax) =
@@ -178,7 +171,7 @@ playerVel f (NewlyFalling pt v t) = (\ v' -> NewlyFalling pt v' t) <$> f v
 playerLoc :: Getter PlayerMovement Point
 playerLoc = to _playerLoc
 _playerLoc :: PlayerMovement -> Point
-_playerLoc (Standing (BlockKey (x,y)) xOffset _ _) =(fromIntegral x+xOffset,fromIntegral y+(1+playerHeight)/2)
+_playerLoc (Standing (x,y) xOffset _ _) =(fromIntegral x+xOffset,fromIntegral y+(1+playerHeight)/2)
 _playerLoc (Jumping pt _ _) = pt
 _playerLoc (Falling pt _) = pt
 _playerLoc (NewlyFalling pt _ _) = pt
@@ -189,7 +182,7 @@ playerHeight :: Float
 playerHeight = 0.8
 
 playerTrajectory :: PlayerMovement -> Trajectory
-playerTrajectory mov@(Standing (BlockKey (x,y)) xOffset vx ax) =
+playerTrajectory mov@(Standing (x,y) xOffset vx ax) =
         RunTrajectory (mov^.playerLoc) vx ax vRunMax
 playerTrajectory (Jumping (x,y) (vx,vy) ay) =
     JumpTrajectory (x,y) (vx,vy) ay g jumpJerk
@@ -201,7 +194,7 @@ playerTrajectory (NewlyFalling (x,y) (vx,vy) timeleft) =
 trajectoryMovement :: Trajectory -> PlayerMovement
 trajectoryMovement (RunTrajectory (x, y) vx ax _) = let
   (xi, yi) = (round x, round y)
-  in Standing (BlockKey (xi, yi)) (x - fromIntegral xi) vx ax
+  in Standing (xi, yi) (x - fromIntegral xi) vx ax
 trajectoryMovement (JumpTrajectory pt v ay _ _) =
   Jumping pt v ay
 --Note that this should maybe be NewlyFalling: you need to be careful here.

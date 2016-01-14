@@ -28,6 +28,7 @@ import World
 import Physics
 import Render
 import Utils
+import qualified Map2D
 
 popCci :: CConVal -> State World Int
 popCci grounded = do
@@ -50,7 +51,7 @@ linkOff linkKey = fmap isJust $ runMaybeT $ do
     unless (S.member blockA connectedToB) $ do
         lift $ cCons.at ccKeyA %= fmap (subtract bGrounded)
         cciB <- lift $ popCci bGrounded
-        lift $ blocks.atMulti connectedToB.traverse.cci.= cciB
+        lift $ blocks.Map2D.atMulti (S.toList connectedToB).traverse.cci.= cciB
 
 linkOn :: LinkKey -> Force -> State World Bool
 linkOn linkKey force = fmap isJust $ runMaybeT $ do
@@ -64,9 +65,9 @@ linkOn linkKey force = fmap isJust $ runMaybeT $ do
     unless (cciA == cciB) $ do
         lift $ assign (cCons.at cciA.traverse) (aGrounded + bGrounded)
         lift $ pushCci cciB
-        lift $ blocks.atMulti connectedToB.traverse.cci.= cciA
+        lift $ blocks.Map2D.atMulti (S.toList connectedToB).traverse.cci.= cciA
 
-removeBlock :: BlockKey -> State World Bool
+removeBlock :: IntPt -> State World Bool
 removeBlock blockKey = fmap isJust $ runMaybeT $ do
     _ <- lift $ traverse (linkOff . snd) $ possibleLinks blockKey
     BlockVal _ cci <- MaybeT $ use $ blocks.at blockKey
@@ -75,7 +76,7 @@ removeBlock blockKey = fmap isJust $ runMaybeT $ do
     lift $ pushCci cci
 
 addBlock :: Block -> State World ()
-addBlock (blockKey @(BlockKey (x,y)),val) = do
+addBlock (blockKey @(x,y),val) = do
     blocks.at blockKey.= Just val
     traverse_ addLink $ possibleLinks blockKey
     where
@@ -83,7 +84,7 @@ addBlock (blockKey @(BlockKey (x,y)),val) = do
             blockVal <- use $ blocks.at blockKey
             when (isJust blockVal) $ links.at linkKey.= Just OffLink
 
-connectedNeighbors :: BlockKey -> Reader World [BlockKey]
+connectedNeighbors :: IntPt -> Reader World [IntPt]
 connectedNeighbors blockKey = do
     links' <- view links --TODO: MAKE THIS NOT DUMB
     return [blockKey | (blockKey,linkKey) <- H.elems $ possibleLinks blockKey,
@@ -91,16 +92,16 @@ connectedNeighbors blockKey = do
             Just (OnLink _) -> True
             _ -> False]
 
-subgraph :: BlockKey -> Reader World (S.Set BlockKey,Int)
+subgraph :: IntPt -> Reader World (S.Set IntPt,Int)
 subgraph blockKey = dfs [blockKey] (S.empty,0) where
-    isBedrock :: BlockKey -> Reader World Int
+    isBedrock :: IntPt -> Reader World Int
     isBedrock blockKey = do
         block <- view $ blocks.at blockKey
         case block of
             Just (BlockVal Bedrock _) -> return 1
             Just (BlockVal _ _) -> return 0
             Nothing -> error "blockKey not found in blockMap"
-    dfs :: [BlockKey] -> (S.Set BlockKey,Int) -> Reader World (S.Set BlockKey,Int)
+    dfs :: [IntPt] -> (S.Set IntPt, Int) -> Reader World (S.Set IntPt, Int)
     dfs [] out = return out
     dfs (x:xs) (visited,grounded)
         |x `S.member` visited = dfs xs (visited,grounded)
@@ -125,7 +126,7 @@ linkGrounded key = do
                 _       -> True
 
 startJump :: Player -> Player
-startJump (Player (Standing (BlockKey (x,y)) xOffset vx _)) =
+startJump (Player (Standing (x,y) xOffset vx _)) =
     Player $ Jumping (fromIntegral x + xOffset,fromIntegral y) (vx,vJump) g
 startJump (Player (NewlyFalling (x,y) (vx,vy) _)) =
     Player $ Jumping (x,y) (vx,vJump+vy) g
@@ -138,7 +139,7 @@ setForces = do
             Just cc <- use $ cCons.at blockCCi
             return (blockType==Bedrock,cc)
         ) =<< use blocks
-    let blockForces = const fg <$> H.filter (
+    let blockForces = const fg <$> Map2D.filter (
             \ (isBedrock,nGroundings) ->
                 not isBedrock && nGroundings > 0
             )blocksGrounded
@@ -149,7 +150,7 @@ setForces = do
         updateLink (OnLink _) = OnLink force
         in links.at linkKey%= fmap updateLink) $ H.toList forces
 
-cycleBlock :: BlockKey -> State World ()
+cycleBlock :: IntPt -> State World ()
 cycleBlock key  = do
     blockVal <- use $ blocks.at key
     case blockVal of
