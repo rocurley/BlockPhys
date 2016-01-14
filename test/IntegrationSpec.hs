@@ -23,11 +23,6 @@ spec :: Spec
 spec = do
   describe "Players" $ do
     it "should stay in a box" $ within (10^5) $ property $ \ plr t -> let
-      addJail = execState $ do
-        traverse_ cycleBlock [( x,-3) | x <- [-3..3]]
-        traverse_ cycleBlock [( x, 3) | x <- [-3..3]]
-        traverse_ cycleBlock [(-3, y) | y <- [-2..2]]
-        traverse_ cycleBlock [( 3, y) | y <- [-2..2]]
       world = addJail $ World Map2D.empty Map.empty Map.empty [0..] plr
       newWorld = stepWorld (abs t) world
       (x,y) = newWorld^.player.playerMovement.playerLoc

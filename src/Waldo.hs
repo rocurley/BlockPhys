@@ -30,6 +30,12 @@ import Render
 import Utils
 import qualified Map2D
 
+addJail = execState $ do
+  traverse_ cycleBlock [( x,-3) | x <- [-3..3]]
+  traverse_ cycleBlock [( x, 3) | x <- [-3..3]]
+  traverse_ cycleBlock [(-3, y) | y <- [-2..2]]
+  traverse_ cycleBlock [( 3, y) | y <- [-2..2]]
+
 popCci :: CConVal -> State World Int
 popCci grounded = do
     i:is <- use cCis
