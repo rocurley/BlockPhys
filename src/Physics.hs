@@ -280,9 +280,6 @@ predictCollision :: Trajectory -> Float -> Reader World (Maybe Collision)
 predictCollision trajectory dt = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
     let (xTouchDist,yTouchDist) = ((playerWidth+1)/2,(playerHeight+1)/2)
-    let blockCandidates = [(blockX,blockY)|
-            blockX<-[ceiling (xmin-xTouchDist)..floor (xmax+xTouchDist)],
-            blockY<-[ceiling (ymin-yTouchDist)..floor (ymax+yTouchDist)]]
     blocksInBox <-
         Map2D.rangeInc
           (ceiling $ xmin - xTouchDist, ceiling $ ymin - yTouchDist)
