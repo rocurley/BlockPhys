@@ -1,7 +1,4 @@
-#flags:
-  #blockPhysics:
-      #enable-executable-profiling: true
-      #enable-library-profiling: true
+flags: {}
 extra-package-dbs: []
 packages:
 - '.'
@@ -14,4 +11,5 @@ extra-deps:
 - gloss-1.9.4.1
 - gloss-rendering-1.9.3.1
 - hmatrix-quadprogpp-0.2.0.2
+- polynomial-0.7.2
 resolver: lts-3.14
