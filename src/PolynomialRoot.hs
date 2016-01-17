@@ -72,7 +72,9 @@ bisectL f xLow xHigh =
     xLeft = min xLow xHigh
     xRight = max xLow xHigh
     in if succIEEE xLeft == xRight || xLeft == xRight
-    then xLeft
+    then if f xRight == 0
+         then xRight
+         else xLeft
     else let
         xNew = (xLow + xHigh)/2
         yNew = f xNew
