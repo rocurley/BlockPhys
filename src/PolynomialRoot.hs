@@ -84,7 +84,9 @@ bisectL f xLow xHigh =
             LT -> bisectL f xNew xHigh
 
 findRoots :: (Show a, IEEE a) => Poly a -> [a]
-findRoots p = do
+findRoots p
+  |polyDegree p <= 0 = []
+  |otherwise = do
     (l,r) <- isolateRoots p
     return $ bisectL (evalPoly p) l r
 
