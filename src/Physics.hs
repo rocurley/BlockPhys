@@ -43,6 +43,9 @@ import Control.Applicative
 import Data.Monoid
 import Data.Foldable
 import Data.Ord
+
+import Math.Polynomial
+
 import Safe hiding (at)
 
 import Control.Lens
@@ -50,6 +53,7 @@ import Control.Lens
 import Debug.Trace
 
 import World
+import PolynomialRoot
 import Map2D (Map2D)
 import qualified Map2D as Map2D hiding (Map2D)
 
@@ -212,20 +216,23 @@ jumpEndTime aJump jerk = case compare (aJump*jerk) 0 of
                            LT -> Just $ -aJump/jerk
 
 xint :: Float -> Trajectory -> [(Point,Time)]
-xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) =
-    -- 0 = 1/2*ay*t^2 + vy*t + (y-lineY)
-    [(startPoint $ atT trajectory t,t)|t <- solveQuadratic (1/2*ay) vy (y-lineY)]
+xint lineY trajectory@(Parabola (x,y) (vx,0) 0) = []
+xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) = let
+  -- 0 = 1/2*ay*t^2 + vy*t + (y-lineY)
+  p = poly BE [ay/2, vy, y-lineY]
+  in [(startPoint $ atT trajectory t,t)|t <- findRoots p]
 xint lineY (RunTrajectory{}) = []
 xint lineY (JumpTrajectory (x,y) (vx,vy) aJump aG 0) =
     xint lineY $ Parabola (x,y) (vx,vy) (aJump+aG)
-xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) =
+xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) = let
     -- 0 = 1/6*jerk*t^3+1/2*(aJump+aG)*t^2 + vy*t + (y-lineY)
-    case jumpEndTime aJump jerk of
+    p = poly BE [jerk/6, (aJump+aG)/2, vy, y-lineY]
+    in case jumpEndTime aJump jerk of
       Nothing -> [(startPoint $ atT trajectory  t,t) |
-            t <- solveCubic (1/6*jerk) (1/2*(aJump+aG)) vy (y-lineY), t > 0]
+            t <- findRoots p, t > 0]
       Just tJumpEnd -> let
         collisionsDuringJump = [(startPoint $ atT trajectory  t,t) |
-            t <- solveCubic (1/6*jerk) (1/2*(aJump+aG)) vy (y-lineY), t<tJumpEnd, t > 0]
+            t <- findRoots p, t<tJumpEnd, t > 0]
         postJumpTrajectory = atT trajectory tJumpEnd
         collisionsAfterJump = [(pt,t+tJumpEnd) | (pt,t) <- xint lineY postJumpTrajectory, t > 0]
         in collisionsDuringJump++collisionsAfterJump
@@ -238,7 +245,8 @@ yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax)
   |otherwise = let
     signedVmax = vmax*signum ax
     tMaxSpeed = (vmax -vx)/ax
-    tsPreMax = filter (< tMaxSpeed) $ solveQuadratic ax vx (x-lineX)
+    p = poly BE [ax/2, vx, x - lineX]
+    tsPreMax = filter (< tMaxSpeed) $ findRoots p
     RunTrajectory (x',_) vx' _ _ = atT trajectory tMaxSpeed
     tPostMax = tMaxSpeed + (lineX-x')/vx'
     ts = if tPostMax >= tMaxSpeed
@@ -260,12 +268,13 @@ criticalPoints (Parabola _ (_,vy) 0) =[]
 criticalPoints (Parabola _ (_,vy) ay) =[-vy/ay]
 criticalPoints (RunTrajectory _ vx 0 _) = []
 criticalPoints (RunTrajectory _ vx ax _) = [-vx/ax]
-criticalPoints trajectory@(JumpTrajectory _ (_,vy) aJump aG jerk) =
-  case jumpEndTime aJump jerk of
+criticalPoints trajectory@(JumpTrajectory _ (_,vy) aJump aG jerk) = let
+  roots = findRoots $ poly BE [ jerk/2, aG + aJump, vy]
+  in case jumpEndTime aJump jerk of
     --1/2*jerk*t^2 + (aG+aJump)*t + vy =0
-    Nothing -> solveQuadratic (1/2*jerk) (aG+aJump) vy
+    Nothing -> roots
     Just tJumpEnd -> let
-      criticalPointsDuringJump = filter (<tJumpEnd) $ solveQuadratic (1/2*jerk) (aG+aJump) vy
+      criticalPointsDuringJump = filter (<tJumpEnd) roots
       postJumpTrajectory = atT trajectory tJumpEnd
       criticalPointsAfterJump = [t+tJumpEnd|t <- criticalPoints postJumpTrajectory]
       in criticalPointsDuringJump ++ criticalPointsAfterJump
@@ -394,30 +403,3 @@ bisect f xLow xHigh = let
             EQ -> xNew
             GT -> bisect f xLow xNew
             LT -> bisect f xNew xHigh
-
-solveQuadratic :: Float -> Float -> Float -> [Float]
-solveQuadratic 0 0 _ = [] --This ignores the 0=0 case...
-solveQuadratic 0 b c =  [-c/b]
-solveQuadratic a b c = let
-    discriminant = b^2-4*a*c
-    in case compare discriminant 0 of
-        LT -> []
-        EQ -> [-b/(2*a)]
-        GT -> do
-            pm <- [(+),(-)]
-            return $ ((-b) `pm` sqrt discriminant)/(2*a)
-
-solveDCubic :: Float -> Float -> [Float]
-solveDCubic p q = let
-    y x = x^3 + p*x+q
-    xLeft = 2 * (-max 0 (-p) **(1/2) - max 0 q **(1/3))
-    xRight = 2 * (max 0 (-p) **(1/2) + max 0 (-q) **(1/3))
-    r = bisect y xLeft xRight
-    in r:filter (/=r) (solveQuadratic 1 r (r^2+p))
-
-solveCubic :: Float -> Float -> Float -> Float -> [Float]
-solveCubic 0 b c d = solveQuadratic b c d
-solveCubic a b c d = let
-    p = (3*a*c-b^2)/(3*a^2)
-    q = (2*b^3-9*a*b*c+27*a^2*d)/(27*a^3)
-    in map (subtract (b/(3*a))) $ solveDCubic p q
