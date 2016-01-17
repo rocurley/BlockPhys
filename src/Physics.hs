@@ -164,12 +164,12 @@ startVelocity (JumpTrajectory _ vel _ _ _) = vel
 
 naiveAtT :: Trajectory -> Time -> Trajectory
 naiveAtT (Parabola (x,y) (vx,vy) ay) t = let
-    (x',y') = (vx*t+x,1/2*ay*t^2 + vy*t + y)
+    (x',y') = (vx*t+x,ay/2*t^2 + vy*t + y)
     (vx',vy') = (vx,vy+ay*t)
     in Parabola (x',y') (vx',vy') ay
 naiveAtT (JumpTrajectory (x,y) (vx,vy) aJump aG jerk) t = let
-    (x',y') = (vx*t+x,1/6*jerk*t^3 + 1/2*(aG+aJump)*t^2 + vy*t + y)
-    (vx',vy') = (vx,1/2*jerk*t^2 + (aG+aJump)*t + vy)
+    (x',y') = (vx*t+x,jerk/6*t^3 +(aG+aJump)/2*t^2 + vy*t + y)
+    (vx',vy') = (vx,jerk/2*t^2 + (aG+aJump)*t + vy)
     aJump' = aJump + t*jerk
     in JumpTrajectory (x',y') (vx',vy') aJump' aG jerk
 naiveAtT (RunTrajectory (x,y) vx ax vmax) t = let
