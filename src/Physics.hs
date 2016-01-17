@@ -241,12 +241,15 @@ yint :: Float -> Trajectory -> [(Point,Time)]
 yint lineX trajectory@(RunTrajectory (x,y) 0 0 vmax) = []
 yint lineX trajectory@(RunTrajectory (x,y) vx 0 vmax) = [((lineX,y), (lineX - x)/vx)]
 yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax)
-  |vx > vmax = yint lineX $ RunTrajectory (x,y) vmax 0 vmax
+  |vmax < 0 = error  $ "vmax must not be negative: vmax = " ++ show vmax
+  |abs vx > abs vmax = yint lineX $ RunTrajectory (x,y) (signum vx * abs vmax) ax vmax
   |otherwise = let
     signedVmax = vmax*signum ax
-    tMaxSpeed = (vmax -vx)/ax
+    tMaxSpeed = case ax of
+      0 -> infinity
+      _ -> (signedVmax - vx)/ax
     p = poly BE [ax/2, vx, x - lineX]
-    tsPreMax = filter (< tMaxSpeed) $ findRoots p
+    tsPreMax = filter (\ t -> 0 < t && t < tMaxSpeed) $ findRoots p
     RunTrajectory (x',_) vx' _ _ = atT trajectory tMaxSpeed
     tPostMax = tMaxSpeed + (lineX-x')/vx'
     ts = if tPostMax >= tMaxSpeed
@@ -256,11 +259,11 @@ yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax)
 yint lineX trajectory@(Parabola (_,_) (0,_) _) = []
 yint lineX trajectory@(Parabola (x,_) (vx,_) _) = let
     t = (lineX-x)/vx
-    in [(startPoint $ atT trajectory t, t)]
+    in [(startPoint $ atT trajectory t, t)|t >= 0]
 yint lineX trajectory@(JumpTrajectory (_,_) (0,_) _ _ _) = []
 yint lineX trajectory@(JumpTrajectory (x,_) (vx,_) _ _ _) = let
     t = (lineX-x)/vx
-    in [(startPoint $ atT trajectory t, t)]
+    in [(startPoint $ atT trajectory t, t)|t>=0]
 
 --Note that this doesn't nessecarily get critical points in the past.
 criticalPoints :: Trajectory -> [Time]
