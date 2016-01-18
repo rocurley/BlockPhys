@@ -343,34 +343,60 @@ timeEvolvePlayerMovementNoCollision t mov = let
         (x',y') = (round x, round $ y + (playerHeight + 1)/2)
         in Standing (x', y') (x - fromIntegral x') vx ax
 
+checkSupport :: IntPt -> Float -> Float -> Float -> Reader World PlayerMovement
+checkSupport (xInt, yInt) xOffset vx ax
+    |abs xOffset > 1/2 = let
+      dXInt = round xOffset
+      in checkSupport (xInt + dXInt, yInt) (xOffset - fromIntegral dXInt) vx ax
+    |otherwise = do
+      leftBlock  <- view $ blocks.at (xInt - 1, yInt)
+      midBlock   <- view $ blocks.at (xInt    , yInt)
+      rightBlock <- view $ blocks.at (xInt + 1, yInt)
+      return $ result leftBlock midBlock rightBlock
+        where
+          result leftBlock midBlock rightBlock
+            | isJust midBlock = Standing (xInt, yInt) xOffset vx ax
+            | 1 - xOffset <= (1 + playerWidth) / 2 && isJust rightBlock =
+                Standing (xInt + 1, yInt) (xOffset - 1) vx ax
+            | 1 + xOffset <= (1 + playerWidth) / 2 && isJust leftBlock =
+                Standing (xInt - 1, yInt) (xOffset + 1) vx ax
+            |otherwise = NewlyFalling
+                (fromIntegral xInt + xOffset, fromIntegral yInt + (1 + playerHeight)/2)
+                (vx,0)
+                jumpGraceTime
+
 --Passing the player as an argument instead of from the world makes
 --it much easier to define recursively.
 timeEvolvePlayerMovement :: Time -> PlayerMovement -> Reader World PlayerMovement
-timeEvolvePlayerMovement t mov@(Standing (xInt,yInt) xOffset vx ax) = do
-    let (x,y) = (fromIntegral xInt,fromIntegral yInt)
-    let trajectory = playerTrajectory mov
-    let runOffTime = minimumMay $ filter (>= 0) $ map snd $
-            yint (x+(1+playerWidth)/2) trajectory ++ yint (x-(1+playerWidth)/2) trajectory
-    let patchTime = maybe t (min t) runOffTime
-    collision <- predictCollision trajectory patchTime
-    case collision of
-        Nothing -> do --Didn't run into anything
-            let newTrajectory@(RunTrajectory (x',y') vx' ax' _) =
-                    atT trajectory patchTime
-            let newXInt = round x'
-            let newBlockKey = (newXInt,y)
-            newBlockVal <- view $ blocks.at newBlockKey
-            case (compare t patchTime,newBlockVal) of
-                (GT,Just _) -> --Ran onto a new block
-                    timeEvolvePlayerMovement (t-patchTime) $
-                        Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
-                (GT,Nothing) -> --Ran off into space
-                    timeEvolvePlayerMovement (t-patchTime) $
-                        Falling (x',y') (vx',0)
-                (_,_) -> --Still on the first block
-                    return $ Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
-        Just (Collision (x',_) _ _ _) -> --Ran into something
-            return $ Standing (xInt,yInt) (x'-x) vx ax
+timeEvolvePlayerMovement t mov@(Standing (xInt0,yInt0) xOffset0 vx0 ax0) = do
+  mov' <- checkSupport (xInt0, yInt0) xOffset0 vx0 ax0
+  case mov' of
+    NewlyFalling{} -> timeEvolvePlayerMovement t mov'
+    Standing (xInt,yInt) xOffset vx ax -> do
+      let (x,y) = (fromIntegral xInt,fromIntegral yInt)
+      let trajectory = playerTrajectory mov'
+      let runOffTime = minimumMay $ filter (>= 0) $ map snd $
+              yint (x+(1+playerWidth)/2) trajectory ++ yint (x-(1+playerWidth)/2) trajectory
+      let patchTime = maybe t (min t) runOffTime
+      collision <- predictCollision trajectory patchTime
+      case collision of
+          Nothing -> do --Didn't run into anything
+              let newTrajectory@(RunTrajectory (x',y') vx' ax' _) =
+                      atT trajectory patchTime
+              let newXInt = round x'
+              let newBlockKey = (newXInt,y)
+              newBlockVal <- view $ blocks.at newBlockKey
+              case (compare t patchTime,newBlockVal) of
+                  (GT,Just _) -> --Ran onto a new block
+                      timeEvolvePlayerMovement (t-patchTime) $
+                          Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
+                  (GT,Nothing) -> --Ran off into space
+                      timeEvolvePlayerMovement (t-patchTime) $
+                          NewlyFalling (x',y') (vx',0) jumpGraceTime
+                  (_,_) -> --Still on the first block
+                      return $ Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
+          Just (Collision (x',_) _ _ _) -> --Ran into something
+              return $ Standing (xInt,yInt) (x'-x) vx ax
 timeEvolvePlayerMovement t mov = do
     let trajectory = playerTrajectory mov
     collision <- predictCollision trajectory t
