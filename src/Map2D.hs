@@ -57,6 +57,9 @@ keys = map fst . toList
 fromList :: (Ord a, Ord b) => [((a,b), v)] -> Map2D a b v
 fromList = Map2D . foldr (\ ((x, y), v) -> Map.insertWith (Map.union) x (Map.singleton y v)) Map.empty
 
+instance (Show a, Show b, Ord a, Ord b, Show v) => Show (Map2D a b v) where
+  show m = "toList " ++ show (toList m)
+
 iso :: Lens.Iso' (Map2D k1 k2 v) (Map k1 (Map k2 v))
 iso = Lens.iso fromMap2D Map2D
 
