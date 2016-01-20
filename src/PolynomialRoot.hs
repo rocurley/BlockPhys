@@ -50,7 +50,9 @@ refineRootIntervals rootCounter (l, r) =
         _ -> do
             let mid = (l + r)/2
             (l',r') <- [(l,mid),(mid,r)]
-            refineRootIntervals rootCounter (l', r')
+            if l == mid || r == mid
+            then return (l, r)
+            else refineRootIntervals rootCounter (l', r')
 
 isolateRoots :: (Ord a, Fractional a) => Poly a -> [(a,a)]
 isolateRoots p = let
@@ -68,7 +70,6 @@ bisectL f xLow xHigh
     | f xLow > f xHigh = bisectL f xHigh xLow
 bisectL f xLow xHigh =
   let
-  --traceShow (xLow,xHigh) $ let
     xLeft = min xLow xHigh
     xRight = max xLow xHigh
     in if succIEEE xLeft == xRight || xLeft == xRight
