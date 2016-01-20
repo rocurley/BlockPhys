@@ -6,6 +6,7 @@ module World
 , g
 , jumpJerk
 , vJump
+, jumpGraceTime
 , Velocity
 , Trajectory(..)
 , IntPt
@@ -68,6 +69,8 @@ vJump :: Float
 vJump = 5
 vRunMax :: Float
 vRunMax = 5
+jumpGraceTime :: Float
+jumpGraceTime = 1
 
 
 type IntPt = (Int,Int)
