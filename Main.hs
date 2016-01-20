@@ -8,12 +8,8 @@ import Graphics.Gloss.Interface.Pure.Game
 import Data.Fixed
 import Data.Maybe
 
-import Data.Foldable
-
 import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
-
---import Debug.Trace
 
 import qualified Data.Map as H
 
@@ -30,7 +26,7 @@ main = play displayMode white 60
     initialWorld
     (runReader renderWorld)
     handleEvent
-    (const id) --stepWorld
+    stepWorld
 
 --TODO:
 
@@ -44,11 +40,10 @@ main = play displayMode white 60
 displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 initialPlayer :: Player
---initialPlayer = Player $ Standing (BlockKey (-3,0)) 0 5 0
-initialPlayer = Player $ Jumping (0.0,0.0) (7.4241276,2.2388887) (-13.159124)
+initialPlayer = Player $ Jumping (0, (1 + playerHeight)/2) (1,0) 5
+--initialPlayer = Player $ Falling (0.0,3.0) (1,1)
 initialWorld :: World
-initialWorld = World (Map2D.singleton (-3,0) (BlockVal Bedrock 0))
-    H.empty (H.singleton 0 1) [1..] initialPlayer
+initialWorld = execState (cycleBlock (0,0)) $ World Map2D.empty H.empty H.empty [0..] initialPlayer
 
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
@@ -58,18 +53,19 @@ handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
         Nothing -> cycleBlock (roundToIntPoint pt)
 handleEvent _ = id
 
+linkTester :: Point -> LinkKey -> Reader World (Maybe LinkKey)
+linkTester (x,y) linkKey = do
+    linkVal <- view $ links.at linkKey
+    return $ if inDiamond (x,y) && isJust linkVal
+             then Just linkKey
+             else Nothing
+
 linkClickCheck :: Point -> Reader World (Maybe LinkKey)
 linkClickCheck (x,y) = let
     (xi,xrem) = divMod' (x/scaleFactor) 1
     (yi,yrem) = divMod' (y/scaleFactor) 1
     u = xrem + yrem -1
     v = yrem - xrem
-    linkTester :: Point -> LinkKey -> Reader World (Maybe LinkKey)
-    linkTester (x,y) linkKey = do
-        linkVal <- view $ links.at linkKey
-        return $ if inDiamond (x,y) && isJust linkVal
-                 then Just linkKey
-                 else Nothing
     in case (compare u 0,compare v 0) of
         (LT,LT) -> linkTester (xrem,yrem)   $ Link L2R (xi,yi)
         (LT,GT) -> linkTester (yrem,xrem)   $ Link D2U (xi,yi)
