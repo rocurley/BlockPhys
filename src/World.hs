@@ -77,7 +77,6 @@ type IntPt = (Int,Int)
 
 type Velocity = (Float,Float)
 
---Consider adding a "Patched Trajectory".
 data Trajectory = Parabola Point Velocity Float |
                   RunTrajectory Point Float Float Float |
                   JumpTrajectory Point Velocity Float Float Float deriving (Show,Eq,Ord)
@@ -88,6 +87,7 @@ instance Arbitrary Trajectory where
       0 -> Parabola <$> arbitrary <*> arbitrary <*> arbitrary
       1 -> RunTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> fmap abs arbitrary
       2 -> JumpTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary  <*> arbitrary
+      _ -> error "Out of bounds random trajectory constructor"
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 data BlockVal = BlockVal {_blockType :: BlockType, _cci :: Int} deriving (Eq,Ord,Show)
@@ -133,6 +133,7 @@ instance Arbitrary PlayerMovement where
       0 -> Jumping (0,0) <$> arbitrary <*> arbitrary
       1 -> Falling (0,0) <$> arbitrary
       2 -> NewlyFalling (0,0) <$> arbitrary <*> arbitrary
+      _ -> error "Out of bounds random movement constructor"
 
 data World = World {_blocks :: BlockMap,
                     _links :: LinkMap,
@@ -152,10 +153,6 @@ newtype AEndo a m = AEndo {appAEndo :: m (a -> a)}
 instance Applicative m => Monoid (AEndo a m) where
         mempty = AEndo $ pure id
         AEndo f `mappend` AEndo g = AEndo $ (.) <$> f <*> g
-
-mapSet :: Ord k => k -> Maybe v -> Map k v -> Map k v
-mapSet k (Just v) = H.insert k v
-mapSet k Nothing = H.delete k
 
 possibleLinks :: IntPt -> Map Direction (IntPt, LinkKey)
 possibleLinks (x,y) = H.fromList
@@ -185,14 +182,14 @@ playerHeight :: Float
 playerHeight = 0.8
 
 playerTrajectory :: PlayerMovement -> Trajectory
-playerTrajectory mov@(Standing (x,y) xOffset vx ax) =
-        RunTrajectory (mov^.playerLoc) vx ax vRunMax
-playerTrajectory (Jumping (x,y) (vx,vy) ay) =
-    JumpTrajectory (x,y) (vx,vy) ay g jumpJerk
-playerTrajectory (Falling (x,y) (vx,vy)) =
-    Parabola (x,y) (vx,vy) g
-playerTrajectory (NewlyFalling (x,y) (vx,vy) timeleft) =
-    Parabola (x,y) (vx,vy) g
+playerTrajectory mov@(Standing _ _ vx ax) =
+    RunTrajectory (mov^.playerLoc) vx ax vRunMax
+playerTrajectory (Jumping pt v ay) =
+    JumpTrajectory pt v ay g jumpJerk
+playerTrajectory (Falling pt v) =
+    Parabola pt v g
+playerTrajectory (NewlyFalling pt v timeleft) =
+    Parabola pt v g
 
 trajectoryMovement :: Trajectory -> PlayerMovement
 trajectoryMovement (RunTrajectory (x, y) vx ax _) = let
