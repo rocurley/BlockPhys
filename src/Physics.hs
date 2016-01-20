@@ -39,8 +39,6 @@ import Data.Maybe
 import Data.List hiding (foldr,foldl,foldl',minimum,maximum)
 import Control.Monad hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
-import Control.Applicative
-import Data.Monoid
 import Data.Foldable
 import Data.Ord
 
@@ -49,8 +47,6 @@ import Math.Polynomial
 import Safe hiding (at)
 
 import Control.Lens
-
-import Debug.Trace
 
 import World
 import PolynomialRoot
