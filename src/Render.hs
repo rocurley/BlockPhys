@@ -7,7 +7,6 @@ module Render
 , renderLink
 , renderStress
 , stressFromLinks
-, renderTrajectory
 , renderPlayer) where
 
 import Graphics.Gloss.Interface.Pure.Game
@@ -128,18 +127,6 @@ renderStress  (Stress stressMatrix) = let
         in Pictures [arrow, Rotate 180 arrow]
     in Pictures [renderStressComp lu u v,renderStressComp lv v u]
 
-renderTrajectory :: Float -> Float -> Trajectory -> Picture
-renderTrajectory xLim _ trajectory =
-    case compare vx 0 of
-        LT -> Line [(x,yOfX x)|x<-[-xLim..x0f]]
-        GT -> Line [(x,yOfX x)|x<-[x0f..xLim]]
-        EQ -> Blank --Screw all that
-    where
-        (x0,vx) = case trajectory of
-            Parabola (x0',_) (vx',_) _ -> (x0', vx')
-            JumpTrajectory (x0',_) (vx',_) _ _ _ -> (x0', vx')
-        x0f = x0*scaleFactor
-        yOfX x = scaleFactor * snd (startPoint $ atT trajectory $ (x/scaleFactor-x0)/vx)
 renderPlayer :: Player -> Picture
 renderPlayer player = let
   color = withAlpha 0.2 $ case player^.playerMovement of
