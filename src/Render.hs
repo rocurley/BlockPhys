@@ -31,6 +31,7 @@ import qualified Map2D
 import Control.Lens
 
 import Physics
+import Waldo
 import World
 
 renderWorld :: Reader World Picture
@@ -39,9 +40,9 @@ renderWorld = do
     stressPictures <- fmap Pictures $ mapM renderBlockStress =<< view (blocks.to Map2D.keys)
     linkPictures   <- Pictures <$> map renderLink <$> H.toList <$> view links
     playerPicture  <- renderPlayer <$> view player
-    futurePlayers <- traverse (\ t ->
-            view player >>= playerMovement (timeEvolvePlayerMovement t)
-        ) [0.1,0.2..5]
+    futurePlayers <- traverse (\ t -> do
+        ((playerMovement%~unJump) <$> view player) >>= playerMovement (timeEvolvePlayerMovement t)
+        ) [0,0.1..5]
     let playerFuturePictures = Pictures $ renderPlayer <$> futurePlayers
     let debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]

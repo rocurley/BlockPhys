@@ -17,7 +17,7 @@ import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
 import Control.Monad.Trans.Maybe
 
---import Debug.Trace
+import Debug.Trace
 
 import qualified Data.Map as H
 import qualified Data.Set as S
@@ -26,7 +26,6 @@ import Control.Lens
 
 import World
 import Physics
-import Render
 import Utils
 import qualified Map2D
 
@@ -131,13 +130,6 @@ linkGrounded key = do
                 Just 0  -> False
                 _       -> True
 
-startJump :: Player -> Player
-startJump (Player (Standing (x,y) xOffset vx _)) =
-    Player $ Jumping (fromIntegral x + xOffset,fromIntegral y) (vx,vJump) g
-startJump (Player (NewlyFalling (x,y) (vx,vy) _)) =
-    Player $ Jumping (x,y) (vx,vJump+vy) g
-startJump plr = plr
-
 setForces :: State World ()
 setForces = do
     blocksGrounded <- traverse (
@@ -180,7 +172,16 @@ toggleLink linkKey = do
     setForces
 
 stepWorld :: Time -> World -> World
-stepWorld dt = execState (stepWorld' dt) where
+stepWorld dt = execState (stepWorld' $ dt/1) where
   stepWorld' :: Time -> State World ()
   stepWorld' dt = do
       get >>= (player.playerMovement $ asState . timeEvolvePlayerMovement dt) >>= put
+
+jump :: PlayerMovement -> PlayerMovement
+jump mov@(Falling{}) = mov
+jump mov@(Jumping{}) = mov
+jump mov = traceShowId $ Jumping (mov^.playerLoc) (mov^.playerVel._1, vJump) aJump
+
+unJump :: PlayerMovement -> PlayerMovement
+unJump mov@(Jumping{}) = Falling (mov^.playerLoc) (mov^.playerVel)
+unJump mov = mov

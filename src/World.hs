@@ -1,50 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module World
-( scaleFactor
-, blockSize
-, g
-, jumpJerk
-, vJump
-, jumpGraceTime
-, Velocity
-, Trajectory(..)
-, IntPt
-, BlockType(..)
-, BlockVal(..)
-, blockType
-, cci
-, Block
-, BlockMap
-, LinkKey(..)
-, LinkDir(..)
-, LinkVal(..)
-, Link
-, LinkMap
-, Force(..)
-, CConKey
-, CConVal
-, CCon
-, CConMap
-, Player(..)
-, playerMovement
-, PlayerMovement(..)
-, World(..)
-, playerWidth
-, playerHeight
-, blocks
-, links
-, cCons
-, cCis
-, player
-, Direction(..)
-, force0
-, linkedBlocks
-, possibleLinks
-, playerTrajectory
-, trajectoryMovement
-, playerLoc
-) where
+module World where
 
 import Graphics.Gloss.Interface.Pure.Game
 
@@ -54,6 +10,8 @@ import Control.Lens
 import Test.QuickCheck.Arbitrary
 import Test.QuickCheck.Gen
 
+import Debug.Trace
+
 import qualified Map2D as Map2D hiding (Map2D)
 import Map2D (Map2D)
 
@@ -61,17 +19,28 @@ scaleFactor :: Float
 scaleFactor = 80
 blockSize :: Float
 blockSize = 0.95
+
 g :: Float
 g = -1
-jumpJerk :: Float
-jumpJerk = -5
-vJump :: Float
-vJump = 5
+
+jumpJerk, aJump, vJump :: Float
+(jumpJerk, aJump, vJump) = traceShowId $ let
+    jumpMaxHeight = 2.2
+    jumpMinHeight = 0.2
+    jumpMaxTime   = 0.6
+    vJump = sqrt (-2 * jumpMinHeight * g)
+    aJump = 2 * (-jumpMaxTime * g - 3 * vJump +
+      sqrt (g * (-18 * jumpMaxHeight + jumpMaxTime * (jumpMaxTime * g + 6 *vJump))))/(3 * jumpMaxTime)
+    jumpJerk = -aJump / jumpMaxTime
+    --jumpJerk = 6 * (sqrt (-2 * jumpMinHeight * g) * jumpMaxTime - 2 * jumpMaxHeight)/jumpMaxTime^3
+    --aJump = 6 * jumpMaxHeight / jumpMaxTime^2 - g - 4 * sqrt (-2 * g * jumpMinHeight) /jumpMaxTime
+    --vJump = sqrt (-2 * jumpMinHeight * g)
+    in (jumpJerk, aJump, vJump)
+
 vRunMax :: Float
 vRunMax = 5
 jumpGraceTime :: Float
 jumpGraceTime = 1
-
 
 type IntPt = (Int,Int)
 
@@ -148,11 +117,6 @@ makeLenses ''Player
 linkedBlocks :: LinkKey -> (IntPt, IntPt)
 linkedBlocks (Link L2R (x,y)) = ((x,y), (x+1,y))
 linkedBlocks (Link D2U (x,y)) = ((x,y), (x,y+1))
-
-newtype AEndo a m = AEndo {appAEndo :: m (a -> a)}
-instance Applicative m => Monoid (AEndo a m) where
-        mempty = AEndo $ pure id
-        AEndo f `mappend` AEndo g = AEndo $ (.) <$> f <*> g
 
 possibleLinks :: IntPt -> Map Direction (IntPt, LinkKey)
 possibleLinks (x,y) = H.fromList
