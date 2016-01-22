@@ -4,6 +4,8 @@ import Test.Hspec
 import Test.QuickCheck
 import Control.Exception (evaluate)
 
+import Control.Monad.Reader
+
 import Math.Polynomial
 
 import Physics
@@ -92,3 +94,11 @@ spec = do
   --TODO: Add test that object is actually colliding when the collision is predicted.
   --TODO: Add test that time evolving in 2 parts is the same as in 1 part.
   --TODO: Add parity symmetry test.
+  describe "Physics.timeEvolvePlayerMovement" $ do
+    it "should be divisible" $
+      property $ \ mov t1 t2-> t1 >= 0 && t2 >= 0 ==>
+        flip runReader (emptyWorld $ Player mov) $ do
+            split <- timeEvolvePlayerMovement t2 =<< timeEvolvePlayerMovement t1 mov
+            atOnce <- timeEvolvePlayerMovement (t1 + t2) mov
+            return $ split ~=~ atOnce
+
