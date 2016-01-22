@@ -54,7 +54,7 @@ type Velocity = (Float,Float)
 
 data Trajectory = PolyTrajectory (Poly Float) (Poly Float) deriving (Show,Eq)
 instance Arbitrary Trajectory where
-  arbitrary = PolyTrajectory <$> (poly LE <$> arbitrary) <*> (poly LE <$> arbitrary)
+  arbitrary = PolyTrajectory <$> (poly LE <$> take 4 <$> arbitrary) <*> (poly LE <$> take 4 <$> arbitrary)
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 data BlockVal = BlockVal {_blockType :: BlockType, _cci :: Int} deriving (Eq,Ord,Show)
@@ -117,7 +117,7 @@ instance Arbitrary PlayerMovement where
     case n of
       0 -> Jumping (0,0) <$> arbitrary <*> arbitrary
       1 -> Falling (0,0) <$> arbitrary
-      2 -> NewlyFalling (0,0) <$> arbitrary <*> arbitrary
+      2 -> NewlyFalling (0,0) <$> arbitrary <*> (abs <$> arbitrary)
       _ -> error "Out of bounds random movement constructor"
 
 data World = World {_blocks :: BlockMap,
