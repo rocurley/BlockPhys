@@ -38,25 +38,21 @@ jumpJerk, aJump, vJump :: Float
     in (jumpJerk, aJump, vJump)
 
 vRunMax :: Float
-vRunMax = 5
+vRunMax = 1
+
 jumpGraceTime :: Float
 jumpGraceTime = 1
+
+aRun :: Float
+aRun = 1
 
 type IntPt = (Int,Int)
 
 type Velocity = (Float,Float)
 
-data Trajectory = Parabola Point Velocity Float |
-                  RunTrajectory Point Float Float Float |
-                  JumpTrajectory Point Velocity Float Float Float deriving (Show,Eq,Ord)
+data Trajectory = PolyTrajectory (Poly Float) (Poly Float) deriving (Show,Eq,Ord)
 instance Arbitrary Trajectory where
-  arbitrary = do
-    n <- choose (0 :: Int ,2)
-    case n of
-      0 -> Parabola <$> arbitrary <*> arbitrary <*> arbitrary
-      1 -> RunTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> fmap abs arbitrary
-      2 -> JumpTrajectory <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary  <*> arbitrary
-      _ -> error "Out of bounds random trajectory constructor"
+  arbitrary = PolyTrajectory <$> arbitrary <*> arbitrary
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 data BlockVal = BlockVal {_blockType :: BlockType, _cci :: Int} deriving (Eq,Ord,Show)
@@ -90,10 +86,36 @@ newtype Player = Player {_playerMovement :: PlayerMovement} deriving (Show) --Wi
 instance Arbitrary Player where
   arbitrary = Player <$> arbitrary
 
-data PlayerMovement = Standing IntPt Float Float Float |
-                      Jumping Point Velocity Float | --Jerk is implicit, accel does not include gravity
-                      Falling Point Velocity |
-                      NewlyFalling Point Velocity Float deriving (Show)
+data SupPos= SupPos IntPt Float
+
+supPosPosition :: SupPos -> Point
+supPosPosition (SupPos (x, y) xOffset) = (fromIntegral x + xOffset, fromIntegral y + (1+playerHeight)/2)
+
+makeSupPos :: Point -> SupPos
+makeSupPos (x,y) = let
+  xInt = round x
+  in SupPos (xInt, round y) (x - fromIntegral xInt)
+
+data HDir = HLeft | HRight deriving (Show, Eq, Ord)
+
+{-
+Idea:
+Trajectories are too smart.
+The collision checker does not need to know about state transitions
+This is because state transitions can be predicted and merged into the collisions.
+If the transition happens first, just redo the collision checker.
+Hell, only run the collision checker untill the transition in the first place.
+Given this:
+Trajectories become just the information the collision checker needs: no more.
+data Trajectory = PolyTrajectory (Poly Float) (Poly Float) --Probably this
+PlayerMovement handles the time, runoff (this is a bit fuzzy), and input transitions.
+-}
+
+data PlayerMovement = Grounded SupPos Float (Just HDir)
+                    | Jumping Point Velocity Float --Jerk is implicit, accel does not include gravity
+                    | Falling Point Velocity
+                    | NewlyFalling Point Velocity Float
+                    deriving (Show)
 instance Arbitrary PlayerMovement where
   --This is bad and I should feel bad.
   arbitrary = do
@@ -125,17 +147,17 @@ possibleLinks (x,y) = H.fromList
                                   (DnDir, ((x,y-1),Link D2U (x  ,y-1))),
                                   (UpDir, ((x,y+1),Link D2U (x  ,y  )))]
 
-playerVel :: Functor f => (Velocity -> f Velocity) -> PlayerMovement -> f PlayerMovement
-playerVel f (Standing support xOffset vx ax) =
-    (\ (vx',_) -> Standing support xOffset vx' ax) <$> f (vx,0)
-playerVel f (Jumping pt v ay) = (\ v' -> Jumping pt v' ay) <$> f v
-playerVel f (Falling pt v) = (\ v' -> Falling pt v') <$> f v
-playerVel f (NewlyFalling pt v t) = (\ v' -> NewlyFalling pt v' t) <$> f v
+playerVel :: Getter PlayerMovement Velocity
+playerVel = to _playerVel
+_playerVel (Grounded _ vx _) = (vx, 0)
+_playerVel (Jumping _ v _) = v
+_playerVel (Falling _ v) = v
+_playerVel (NewlyFalling _ v _) = v
 
 playerLoc :: Getter PlayerMovement Point
 playerLoc = to _playerLoc
 _playerLoc :: PlayerMovement -> Point
-_playerLoc (Standing (x,y) xOffset _ _) =(fromIntegral x+xOffset,fromIntegral y+(1+playerHeight)/2)
+_playerloc (Grounde supPos _ _) = supPosPosition supPos
 _playerLoc (Jumping pt _ _) = pt
 _playerLoc (Falling pt _) = pt
 _playerLoc (NewlyFalling pt _ _) = pt
@@ -146,21 +168,19 @@ playerHeight :: Float
 playerHeight = 0.8
 
 playerTrajectory :: PlayerMovement -> Trajectory
-playerTrajectory mov@(Standing _ _ vx ax) =
-    RunTrajectory (mov^.playerLoc) vx ax vRunMax
-playerTrajectory (Jumping pt v ay) =
-    JumpTrajectory pt v ay g jumpJerk
-playerTrajectory (Falling pt v) =
-    Parabola pt v g
-playerTrajectory (NewlyFalling pt v timeleft) =
-    Parabola pt v g
-
-trajectoryMovement :: Trajectory -> PlayerMovement
-trajectoryMovement (RunTrajectory (x, y) vx ax _) = let
-  (xi, yi) = (round x, round y)
-  in Standing (xi, yi) (x - fromIntegral xi) vx ax
-trajectoryMovement (JumpTrajectory pt v ay _ _) =
-  Jumping pt v ay
---Note that this should maybe be NewlyFalling: you need to be careful here.
-trajectoryMovement (Parabola pt vel _) =
-  Falling pt vel
+playerTrajectory mov = let
+    (x, y) = mov^.playerLoc
+    (vx, vy) = mov^.playerVel
+    xLowTerms = [vx, x]
+    yLowTerms = [vy, y]
+    (xHighTerms, yHighTerms) = case mov of
+        Grounded _ _ (Just HLeft)  = ([-aRun], [])
+        Grounded _ _ (Just HRight) = ([ aRun], [])
+        Grounded _ _  Nothing = case compare vx 0 of
+                                  GT -> ([-aRun/2], [])
+                                  EQ -> ([], [])
+                                  LT -> ([ aRun/2], [])
+        Jumping _ _ aJump = ([], [jumpJerk/6, (aJump + g)/2])
+        Falling _ _ = ([],[])
+        NewlyFalling _ _ _ = ([],[])
+    in PolyTrajectory (Poly BE $ xHighTerms ++ xLowTerms) (Poly BE $ yHighTerms ++ yLowTerms)

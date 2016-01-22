@@ -45,6 +45,7 @@ import Data.Ord
 import Math.Polynomial
 
 import Safe hiding (at)
+import qualified Safe
 
 import Control.Lens
 
@@ -148,30 +149,17 @@ blockStress key = do
     maybeLinkVals <- H.toList <$> traverse (\ k -> view (links.at k)) (snd <$> possibleLinks key)
     return $ stressFromLinks [(dir,linkVal)|(dir,Just linkVal) <- maybeLinkVals]
 
+polyCoeff :: Num a => Int -> Poly a -> a
+polyCoeff i p = atDef 0 i $ polyCoeffs LE p
+
 startPoint :: Trajectory -> Point
-startPoint (Parabola pt _ _) = pt
-startPoint (RunTrajectory pt _ _ _) = pt
-startPoint (JumpTrajectory pt _ _ _ _) = pt
+startPoint (PolyTrajectory px py) = (polyCoeff 0 px, polyCoeff 0 py)
 
 startVelocity :: Trajectory -> Velocity
-startVelocity (Parabola _ vel _) = vel
-startVelocity (RunTrajectory _ vx _ _) = (vx,0)
-startVelocity (JumpTrajectory _ vel _ _ _) = vel
+startVelocity (PolyTrajectory px py) = (polyCoeff 1 px, polyCoeff 1 py)
 
-naiveAtT :: Trajectory -> Time -> Trajectory
-naiveAtT (Parabola (x,y) (vx,vy) ay) t = let
-    (x',y') = (vx*t+x,ay/2*t^2 + vy*t + y)
-    (vx',vy') = (vx,vy+ay*t)
-    in Parabola (x',y') (vx',vy') ay
-naiveAtT (JumpTrajectory (x,y) (vx,vy) aJump aG jerk) t = let
-    (x',y') = (vx*t+x,jerk/6*t^3 +(aG+aJump)/2*t^2 + vy*t + y)
-    (vx',vy') = (vx,jerk/2*t^2 + (aG+aJump)*t + vy)
-    aJump' = aJump + t*jerk
-    in JumpTrajectory (x',y') (vx',vy') aJump' aG jerk
-naiveAtT (RunTrajectory (x,y) vx ax vmax) t = let
-        (x',y') = (1/2*ax*t^2+vx*t+x,y)
-        vx' = ax*t+vx
-        in RunTrajectory (x',y) vx' ax vmax
+shiftTrajectory :: Time -> Trajectory -> Trajectory
+shiftTrajectory t (PolyTrajectory p) = composePoly p $ poly BE [1,t]
 
 atT :: Trajectory -> Time -> Trajectory
 atT trajectory@(Parabola{}) t = naiveAtT trajectory t
@@ -212,71 +200,18 @@ jumpEndTime aJump jerk = case compare (aJump*jerk) 0 of
                            LT -> Just $ -aJump/jerk
 
 xint :: Float -> Trajectory -> [(Point,Time)]
-xint lineY trajectory@(Parabola (x,y) (vx,0) 0) = []
-xint lineY trajectory@(Parabola (x,y) (vx,vy) ay) = let
-  -- 0 = 1/2*ay*t^2 + vy*t + (y-lineY)
-  p = poly BE [ay/2, vy, y-lineY]
+xint lineY trajectory@(PolyTrajectory px py) = let
+  p = addPoly py $ constPoly (-lineY)
   in [(startPoint $ atT trajectory t,t)|t <- findRoots p]
-xint lineY (RunTrajectory{}) = []
-xint lineY (JumpTrajectory (x,y) (vx,vy) aJump aG 0) =
-    xint lineY $ Parabola (x,y) (vx,vy) (aJump+aG)
-xint lineY trajectory@(JumpTrajectory (x,y) (vx,vy) aJump aG jerk) = let
-    -- 0 = 1/6*jerk*t^3+1/2*(aJump+aG)*t^2 + vy*t + (y-lineY)
-    p = poly BE [jerk/6, (aJump+aG)/2, vy, y-lineY]
-    in case jumpEndTime aJump jerk of
-      Nothing -> [(startPoint $ atT trajectory  t,t) |
-            t <- findRoots p, t > 0]
-      Just tJumpEnd -> let
-        collisionsDuringJump = [(startPoint $ atT trajectory  t,t) |
-            t <- findRoots p, t<tJumpEnd, t > 0]
-        postJumpTrajectory = atT trajectory tJumpEnd
-        collisionsAfterJump = [(pt,t+tJumpEnd) | (pt,t) <- xint lineY postJumpTrajectory, t > 0]
-        in collisionsDuringJump++collisionsAfterJump
 
 yint :: Float -> Trajectory -> [(Point,Time)]
-yint lineX trajectory@(RunTrajectory (x,y) 0 0 vmax) = []
-yint lineX trajectory@(RunTrajectory (x,y) vx 0 vmax) = [((lineX,y), (lineX - x)/vx)]
-yint lineX trajectory@(RunTrajectory (x,y) vx ax vmax)
-  |vmax < 0 = error  $ "vmax must not be negative: vmax = " ++ show vmax
-  |abs vx > abs vmax = yint lineX $ RunTrajectory (x,y) (signum vx * abs vmax) ax vmax
-  |otherwise = let
-    signedVmax = vmax*signum ax
-    tMaxSpeed = case ax of
-      0 -> infinity
-      _ -> (signedVmax - vx)/ax
-    p = poly BE [ax/2, vx, x - lineX]
-    tsPreMax = filter (\ t -> 0 < t && t < tMaxSpeed) $ findRoots p
-    RunTrajectory (x',_) vx' _ _ = atT trajectory tMaxSpeed
-    tPostMax = tMaxSpeed + (lineX-x')/vx'
-    ts = if tPostMax >= tMaxSpeed
-         then tPostMax:tsPreMax
-         else tsPreMax
-    in [(startPoint $ atT trajectory t, t)|t<-ts]
-yint lineX trajectory@(Parabola (_,_) (0,_) _) = []
-yint lineX trajectory@(Parabola (x,_) (vx,_) _) = let
-    t = (lineX-x)/vx
-    in [(startPoint $ atT trajectory t, t)|t >= 0]
-yint lineX trajectory@(JumpTrajectory (_,_) (0,_) _ _ _) = []
-yint lineX trajectory@(JumpTrajectory (x,_) (vx,_) _ _ _) = let
-    t = (lineX-x)/vx
-    in [(startPoint $ atT trajectory t, t)|t>=0]
+yint lineX trajectory@(PolyTrajectory px py) = let
+  p = addPoly px $ constPoly (-lineX)
+  in [(startPoint $ atT trajectory t,t)|t <- findRoots p]
 
---Note that this doesn't nessecarily get critical points in the past.
+--Note that this doesn't get critical points in the past.
 criticalPoints :: Trajectory -> [Time]
-criticalPoints (Parabola _ (_,vy) 0) =[]
-criticalPoints (Parabola _ (_,vy) ay) =[-vy/ay]
-criticalPoints (RunTrajectory _ vx 0 _) = []
-criticalPoints (RunTrajectory _ vx ax _) = [-vx/ax]
-criticalPoints trajectory@(JumpTrajectory _ (_,vy) aJump aG jerk) = let
-  roots = findRoots $ poly BE [ jerk/2, aG + aJump, vy]
-  in case jumpEndTime aJump jerk of
-    --1/2*jerk*t^2 + (aG+aJump)*t + vy =0
-    Nothing -> roots
-    Just tJumpEnd -> let
-      criticalPointsDuringJump = filter (<tJumpEnd) roots
-      postJumpTrajectory = atT trajectory tJumpEnd
-      criticalPointsAfterJump = [t+tJumpEnd|t <- criticalPoints postJumpTrajectory]
-      in criticalPointsDuringJump ++ criticalPointsAfterJump
+criticalPoints (PolyTrajectory p) = filter (>0) $ findRoots $ polyDeriv p
 
 trajectoryBox :: Trajectory -> Time -> ((Float,Float),(Float,Float))
 trajectoryBox trajectory dt = let
@@ -293,14 +228,6 @@ predictCollision trajectory dt = do
           (ceiling $ xmin - xTouchDist, ceiling $ ymin - yTouchDist)
           (floor $ xmax + xTouchDist, floor $ ymax + yTouchDist)
         <$> view blocks
-    --There's a potential issue where after being stopped by a collision, attempting to
-    --move in the same direction will not trigger a collision. If this comes up, it can
-    --probably be fixed by adding new collision surfaces slightly within the block,
-    --and reporting a collision time that produces the desired result.
-
-    --Annother option, slightly more principled: Improve the root finding algorithm such
-    --that the root is as exact as floats permit while still being on the "right side".
-    --This would probably prevent
     let
       collisions :: [Collision]
       collisions = do
@@ -317,101 +244,115 @@ predictCollision trajectory dt = do
                 ((cx, cy), ct) <- yint (xBlock - xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist]]
         guard (dt > ct && ct > 0)
         return collision
-    return $ minimumByMay ({-# SCC "***MINIMUM_THING****" #-} comparing (\ (Collision _ t _ _) -> t)) collisions
+    return $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) collisions
 
-timeEvolvePlayerMovementNoCollision :: Time -> PlayerMovement -> PlayerMovement
-timeEvolvePlayerMovementNoCollision t mov@(Standing (xInt,yInt) xOffset vx ax) = let
-    trajectory = playerTrajectory mov
-    newTrajectory@(RunTrajectory (x',y') vx' ax' _) = atT trajectory t
-    newXInt = round x'
-    newBlockKey = (newXInt,yInt)
-    in Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
-timeEvolvePlayerMovementNoCollision t mov = let
-    trajectory = playerTrajectory mov
-    in case atT trajectory t of
-      Parabola pt vel _ -> case mov of
-          NewlyFalling _ _ jumpTimeLeft -> case compare jumpTimeLeft t of
-              GT -> NewlyFalling pt vel (jumpTimeLeft - t)
-              _  -> Falling pt vel
-          _ -> Falling pt vel
-      JumpTrajectory pt vel aJump _ _ -> Jumping pt vel aJump
-      RunTrajectory (x,y) vx ax _ -> let
-        (x',y') = (round x, round $ y + (playerHeight + 1)/2)
-        in Standing (x', y') (x - fromIntegral x') vx ax
+walkBlocks :: (IntPt -> IntPt) -> IntPt -> Reader World IntPt
+walkBlocks step x = do
+  block <- view blocks.at (step x)
+  case block of
+    Nothing -> return x
+    Just _  -> walkBlocks step $ step x
 
-checkSupport :: IntPt -> Float -> Float -> Float -> Reader World PlayerMovement
-checkSupport (xInt, yInt) xOffset vx ax
-    |abs xOffset > 1/2 = let
-      dXInt = round xOffset
-      in checkSupport (xInt + dXInt, yInt) (xOffset - fromIntegral dXInt) vx ax
-    |otherwise = do
-      leftBlock  <- view $ blocks.at (xInt - 1, yInt)
-      midBlock   <- view $ blocks.at (xInt    , yInt)
-      rightBlock <- view $ blocks.at (xInt + 1, yInt)
-      return $ result leftBlock midBlock rightBlock
-        where
-          result leftBlock midBlock rightBlock
-            | isJust midBlock = Standing (xInt, yInt) xOffset vx ax
-            | 1 - xOffset <= (1 + playerWidth) / 2 && isJust rightBlock =
-                Standing (xInt + 1, yInt) (xOffset - 1) vx ax
-            | 1 + xOffset <= (1 + playerWidth) / 2 && isJust leftBlock =
-                Standing (xInt - 1, yInt) (xOffset + 1) vx ax
-            |otherwise = NewlyFalling
-                (fromIntegral xInt + xOffset, fromIntegral yInt + (1 + playerHeight)/2)
-                (vx,0)
-                jumpGraceTime
+afterCollision :: Collision -> PlayerMovement -> Reader World (Time, PlayerMovement)
+afterCollision (Collision _ t _ dir) mov = let
+    trajectory = playerTrajectory mov
+    newTrajectory = atT t trajectory
+    pt = startPoint newTrajectory
+    (vx, vy) = startVelocity newTrajectory
+    in case (dir,mov) of
+         (DnDir, _) -> return (t, Falling pt (vx, 0))
+         (UpDir, _) -> do
+            support <- fromMaybe (error "No support yet hit top surface") $ checkSupport pt
+            return (t, Grounded support vx Nothing) -- That Nothing could cause problems later
+         (_, _) -> killVx $ absorbTrajectory t newTrajectory mov
+
+nonCollisionTransition :: PlayerMovement -> Reader World (Maybe (Time, PlayerMovement))
+--Here we assume the starting state is valid.
+nonCollisionTransition mov@(Grounded (SupPos (x,y) xOffset) 0 Nothing) = return Nothing
+nonCollisionTransition mov@(Grounded (SupPos (x,y) xOffset) vx Nothing) = do
+  let tStop = abs vx/aRun
+      trajectory = playerTrajectory mov
+  (leftBound , _) = walkBlocks (first (subtract 1)) (x,y)
+  (rightBound, _) = walkBlocks (first (+1)        ) (x,y)
+  leftRunoff  <- xint (fromInteger leftBound  - (1 + playerWidth)/2) trajectory
+  rightRunoff <- xint (fromInteger rightBound + (1 + playerWidth)/2) trajectory
+  let firstRunoff = minimumMay $ map fst $ catMaybes [leftRunoff, rightRunoff]
+  case firstRunoff of
+    Just tRunoff
+      |tRunoff <= tStop -> let
+        newTrajectory = atT tRunoff trajectory
+        in return $ Just (tRunoff, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
+    _ -> do
+      let newTrajectory = atT tStop trajectory
+      newSupPos <- fromMaybe (error "Support expected but missing") $ checkSupport (startPoint newTrajectory)
+      in Just <$> (tStop, Grounded newSupPos 0)
+nonCollisionTransition Falling{} = return Nothing
+nonCollisionTransition mov@(Jumping _ _ aJump) = return $ do
+    t <- jumpEndTime aJump jumpJerk
+    let trajectory = playerTrajectory mov
+        newTrajectory = atT t trajectory
+    return $ (t, Falling (newTrajectory^.startPoint) (newTrajectory^.startVelocity))
+nonCollisionTransition mov@(NewlyFalling _ _ t) = return $ Just $ let
+    let trajectory = playerTrajectory mov
+        newTrajectory = atT t trajectory
+    return $ (t, Falling (newTrajectory^.startPoint) (newTrajectory^.startVelocity))
+
+nextTransition :: PlayerMovement -> Reader World (Maybe (t, PlayerMovement))
+nextTransition mov = do
+  maybeCollision <- predictCollision mov
+  maybeCTransition <- case maybeCollision of --lift is annoying
+                        Nothing -> return Nothing
+                        Just collision -> Just <$> afterCollision collision mov
+  maybeNCTransition <- nonCollisionTransition mov
+  return $ minimumByMay fst $ catMaybes [maybeCTransition, maybeNCTransition]
+
+killVx :: PlayerMovement -> PlayerMovement
+killVx (Grounded support _ dir) = Grounded support 0 dir
+killVx (Falling pt (_, vy)) = Falling pt (0, vy)
+killVx (NewlyFalling pt (_, vy) t) = NewlyFalling pt (0, vy) t
+killVx (Jumping pt (_, vy) aJump) = Jumping pt (0, vy) aJump
+
+absorbTrajectory :: Time -> Trajectory -> PlayerMovement -> Reader World PlayerMovement
+absorbTrajectory t trajectory mov = do
+    pt = startPoint trajectory
+    (vx, vy) = startVelocity trajectory
+    maybeSupport <- checkSupport pt
+    let support = fromMaybe (error "Attempted to absorb trajectory after running off edge") maybeSupport
+    return case mov of
+             Falling{} -> Falling pt (vx, vy)
+             NewlyFalling _ _ tJump
+               | tJump < t -> error "Attempted to absorb trajectory after jump end"
+               | otherwise -> NewlyFalling pt (vx, vy) (tJump - t)
+             Jumping _ _ aJump -> Jumping pt (vx, vy) (aJump - t * jumpJerk)
+             Grounded _ _ dir = Grounded support vx dir
+
+checkSupport :: Point -> Reader World (Maybe SupPos)
+checkSupport (x0, y0) = do
+    let y = round $ y0 - (1 + playerHeight)/2 -- This is a bit dubious
+        xLeft = floor y
+        xRight = ceil y
+        leftOffset = x0 - fromIntegral xLeft
+        rightOffset = x0 - fromIntegral xRight
+        xLeftInRange  =  leftOffset  < (1 + playerWidth)/2
+        xRightInRange = -rightOffset < (1 + playerWidth)/2
+    xLeftExists  <- isJust <$> view (blocks.at (xLeft , y)
+    xRightExists <- isJust <$> view (blocks.at (xRight, y)
+    return case (xLeftInRange && xLeftExists, xRightInRange && xRightInRange) of
+        (False, False) -> Nothing
+        (True , False) -> Just $ SupPos (xLeft , y) leftOffset
+        (False, True ) -> Just $ SupPos (xRight, y) rightOffset
+        (True , True )
+          | leftOffset < -rightOffset -> Just $ SupPos (xLeft , y) leftOffset
+          | otherwise -> Just $ SupPos (xRight, y) rightOffset
 
 --Passing the player as an argument instead of from the world makes
 --it much easier to define recursively.
 timeEvolvePlayerMovement :: Time -> PlayerMovement -> Reader World PlayerMovement
-timeEvolvePlayerMovement t mov@(Standing (xInt0,yInt0) xOffset0 vx0 ax0) = do
-  mov' <- checkSupport (xInt0, yInt0) xOffset0 vx0 ax0
-  case mov' of
-    NewlyFalling{} -> timeEvolvePlayerMovement t mov'
-    Standing (xInt,yInt) xOffset vx ax -> do
-      let (x,y) = (fromIntegral xInt,fromIntegral yInt)
-      let trajectory = playerTrajectory mov'
-      let runOffTime = minimumMay $ filter (>= 0) $ map snd $
-              yint (x+(1+playerWidth)/2) trajectory ++ yint (x-(1+playerWidth)/2) trajectory
-      let patchTime = maybe t (min t) runOffTime
-      collision <- predictCollision trajectory patchTime
-      case collision of
-          Nothing -> do --Didn't run into anything
-              let newTrajectory@(RunTrajectory (x',y') vx' ax' _) =
-                      atT trajectory patchTime
-              let newXInt = round x'
-              let newBlockKey = (newXInt,y)
-              newBlockVal <- view $ blocks.at newBlockKey
-              case (compare t patchTime,newBlockVal) of
-                  (GT,Just _) -> --Ran onto a new block
-                      timeEvolvePlayerMovement (t-patchTime) $
-                          Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
-                  (GT,Nothing) -> --Ran off into space
-                      timeEvolvePlayerMovement (t-patchTime) $
-                          NewlyFalling (x',y') (vx',0) jumpGraceTime
-                  (_,_) -> --Still on the first block
-                      return $ Standing newBlockKey (x'- fromIntegral newXInt) vx' ax'
-          Just (Collision (x',_) _ _ _) -> --Ran into something
-              return $ Standing (xInt,yInt) (x'-x) vx ax
 timeEvolvePlayerMovement t mov = do
-    let trajectory = playerTrajectory mov
-    collision <- predictCollision trajectory t
-    case collision of
-        Nothing -> return $ timeEvolvePlayerMovementNoCollision t mov
-        Just collision@(Collision pt tCollide blockKey@(blockX,blockY) direction) ->
-          let
-            movAtCollision = timeEvolvePlayerMovementNoCollision t mov
-            trajectoryAtCollision = playerTrajectory movAtCollision
-            (vx, vy) = startVelocity trajectoryAtCollision
-            in timeEvolvePlayerMovement (t-tCollide) $ case direction of
-                --No more jumping if you hit your head
-                DnDir -> Falling pt (vx ,0)
-                UpDir -> Standing blockKey (fst pt - fromIntegral blockX) vx 0
-                _ -> case timeEvolvePlayerMovementNoCollision t mov of
-                       Standing{} -> error "Standing was supposed to have been guarded off"
-                       Jumping _ _ aJump -> Jumping pt (0, vy) aJump
-                       Falling{} -> Falling pt (0, vy)
-                       NewlyFalling _ _ jumpTime -> NewlyFalling pt (0, vy) jumpTime
+    transition <- nextTransition mov
+    case transition of
+      Nothing -> absorbTrajectory t (atT t $ playerTrajectory mov) mov
+      Just (t', mov') = timeEvolvePlayerMovement (t-t') mov'
 
 bisect :: (Float -> Float) -> Float -> Float -> Float
 bisect f xLow xHigh = let
