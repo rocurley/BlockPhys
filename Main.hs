@@ -44,8 +44,7 @@ initialPlayer = Player $ Grounded (SupPos (-3, -3) 0) 0 (Just HRight)
 --initialPlayer = Player $ Jumping (0, (1 + playerHeight)/2) (1,0) 5
 --initialPlayer = Player $ Falling (0.0,3.0) (1,1)
 initialWorld :: World
-initialWorld = execState (traverse cycleBlock [(x,-3)| x <- [-3..3]]) $
-      World Map2D.empty H.empty H.empty [0..] initialPlayer
+initialWorld = execState (traverse cycleBlock [(x,-3)| x <- [-3..3]]) $ emptyWorld initialPlayer
 
 handleEvent :: Event -> World -> World
 handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do

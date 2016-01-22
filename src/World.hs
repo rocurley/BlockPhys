@@ -126,6 +126,8 @@ data World = World {_blocks :: BlockMap,
                     _cCis :: [Int],
                     _player :: Player}
 
+emptyWorld initialPlayer = World Map2D.empty H.empty H.empty [0..] initialPlayer
+
 makeLenses ''World
 makeLenses ''BlockVal
 makeLenses ''Player
