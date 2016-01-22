@@ -180,7 +180,7 @@ stepWorld dt = execState (stepWorld' $ dt/1) where
 jump :: PlayerMovement -> PlayerMovement
 jump mov@(Falling{}) = mov
 jump mov@(Jumping{}) = mov
-jump mov = traceShowId $ Jumping (mov^.playerLoc) (mov^.playerVel._1, vJump) aJump
+jump mov = traceShowId $ Jumping (mov^.playerLoc) (mov^.playerVel._1, vJump) aJump0
 
 unJump :: PlayerMovement -> PlayerMovement
 unJump mov@(Jumping{}) = Falling (mov^.playerLoc) (mov^.playerVel)

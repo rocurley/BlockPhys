@@ -130,7 +130,7 @@ renderStress  (Stress stressMatrix) = let
 renderPlayer :: Player -> Picture
 renderPlayer player = let
   color = withAlpha 0.2 $ case player^.playerMovement of
-            Standing{} -> green
+            Grounded{} -> green
             Jumping{} -> red
             Falling{} -> blue
             NewlyFalling{} -> orange

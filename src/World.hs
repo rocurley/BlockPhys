@@ -12,6 +12,8 @@ import Test.QuickCheck.Gen
 
 import Debug.Trace
 
+import Math.Polynomial
+
 import qualified Map2D as Map2D hiding (Map2D)
 import Map2D (Map2D)
 
@@ -23,19 +25,19 @@ blockSize = 0.95
 g :: Float
 g = -1
 
-jumpJerk, aJump, vJump :: Float
-(jumpJerk, aJump, vJump) = traceShowId $ let
+jumpJerk, aJump0, vJump :: Float
+(jumpJerk, aJump0, vJump) = traceShowId $ let
     jumpMaxHeight = 2.2
     jumpMinHeight = 0.2
     jumpMaxTime   = 0.6
-    vJump = sqrt (-2 * jumpMinHeight * g)
-    aJump = 2 * (-jumpMaxTime * g - 3 * vJump +
-      sqrt (g * (-18 * jumpMaxHeight + jumpMaxTime * (jumpMaxTime * g + 6 *vJump))))/(3 * jumpMaxTime)
-    jumpJerk = -aJump / jumpMaxTime
+    vJump' = sqrt (-2 * jumpMinHeight * g)
+    aJump0' = 2 * (-jumpMaxTime * g - 3 * vJump' +
+      sqrt (g * (-18 * jumpMaxHeight + jumpMaxTime * (jumpMaxTime * g + 6 *vJump'))))/(3 * jumpMaxTime)
+    jumpJerk' = -aJump0' / jumpMaxTime
     --jumpJerk = 6 * (sqrt (-2 * jumpMinHeight * g) * jumpMaxTime - 2 * jumpMaxHeight)/jumpMaxTime^3
     --aJump = 6 * jumpMaxHeight / jumpMaxTime^2 - g - 4 * sqrt (-2 * g * jumpMinHeight) /jumpMaxTime
     --vJump = sqrt (-2 * jumpMinHeight * g)
-    in (jumpJerk, aJump, vJump)
+    in (jumpJerk', aJump0', vJump')
 
 vRunMax :: Float
 vRunMax = 1
@@ -50,9 +52,9 @@ type IntPt = (Int,Int)
 
 type Velocity = (Float,Float)
 
-data Trajectory = PolyTrajectory (Poly Float) (Poly Float) deriving (Show,Eq,Ord)
+data Trajectory = PolyTrajectory (Poly Float) (Poly Float) deriving (Show,Eq)
 instance Arbitrary Trajectory where
-  arbitrary = PolyTrajectory <$> arbitrary <*> arbitrary
+  arbitrary = PolyTrajectory <$> (poly LE <$> arbitrary) <*> (poly LE <$> arbitrary)
 
 data BlockType = Normal | Bedrock deriving (Eq,Ord,Show)
 data BlockVal = BlockVal {_blockType :: BlockType, _cci :: Int} deriving (Eq,Ord,Show)
@@ -86,15 +88,7 @@ newtype Player = Player {_playerMovement :: PlayerMovement} deriving (Show) --Wi
 instance Arbitrary Player where
   arbitrary = Player <$> arbitrary
 
-data SupPos= SupPos IntPt Float
-
-supPosPosition :: SupPos -> Point
-supPosPosition (SupPos (x, y) xOffset) = (fromIntegral x + xOffset, fromIntegral y + (1+playerHeight)/2)
-
-makeSupPos :: Point -> SupPos
-makeSupPos (x,y) = let
-  xInt = round x
-  in SupPos (xInt, round y) (x - fromIntegral xInt)
+data SupPos= SupPos IntPt Float deriving (Show, Eq)
 
 data HDir = HLeft | HRight deriving (Show, Eq, Ord)
 
@@ -111,7 +105,7 @@ data Trajectory = PolyTrajectory (Poly Float) (Poly Float) --Probably this
 PlayerMovement handles the time, runoff (this is a bit fuzzy), and input transitions.
 -}
 
-data PlayerMovement = Grounded SupPos Float (Just HDir)
+data PlayerMovement = Grounded SupPos Float (Maybe HDir)
                     | Jumping Point Velocity Float --Jerk is implicit, accel does not include gravity
                     | Falling Point Velocity
                     | NewlyFalling Point Velocity Float
@@ -148,16 +142,16 @@ possibleLinks (x,y) = H.fromList
                                   (UpDir, ((x,y+1),Link D2U (x  ,y  )))]
 
 playerVel :: Getter PlayerMovement Velocity
-playerVel = to _playerVel
-_playerVel (Grounded _ vx _) = (vx, 0)
-_playerVel (Jumping _ v _) = v
-_playerVel (Falling _ v) = v
-_playerVel (NewlyFalling _ v _) = v
+playerVel = to _playerVel where
+    _playerVel (Grounded _ vx _) = (vx, 0)
+    _playerVel (Jumping _ v _) = v
+    _playerVel (Falling _ v) = v
+    _playerVel (NewlyFalling _ v _) = v
 
 playerLoc :: Getter PlayerMovement Point
 playerLoc = to _playerLoc
 _playerLoc :: PlayerMovement -> Point
-_playerloc (Grounde supPos _ _) = supPosPosition supPos
+_playerLoc (Grounded supPos _ _) = supPosPosition supPos
 _playerLoc (Jumping pt _ _) = pt
 _playerLoc (Falling pt _) = pt
 _playerLoc (NewlyFalling pt _ _) = pt
@@ -174,13 +168,16 @@ playerTrajectory mov = let
     xLowTerms = [vx, x]
     yLowTerms = [vy, y]
     (xHighTerms, yHighTerms) = case mov of
-        Grounded _ _ (Just HLeft)  = ([-aRun], [])
-        Grounded _ _ (Just HRight) = ([ aRun], [])
-        Grounded _ _  Nothing = case compare vx 0 of
+        Grounded _ _ (Just HLeft)  -> ([-aRun], [])
+        Grounded _ _ (Just HRight) -> ([ aRun], [])
+        Grounded _ _  Nothing -> case compare vx 0 of
                                   GT -> ([-aRun/2], [])
                                   EQ -> ([], [])
                                   LT -> ([ aRun/2], [])
-        Jumping _ _ aJump = ([], [jumpJerk/6, (aJump + g)/2])
-        Falling _ _ = ([],[])
-        NewlyFalling _ _ _ = ([],[])
-    in PolyTrajectory (Poly BE $ xHighTerms ++ xLowTerms) (Poly BE $ yHighTerms ++ yLowTerms)
+        Jumping _ _ aJump -> ([], [jumpJerk/6, (aJump + g)/2])
+        Falling _ _ -> ([],[g])
+        NewlyFalling _ _ _ -> ([],[g])
+    in PolyTrajectory (poly BE $ xHighTerms ++ xLowTerms) (poly BE $ yHighTerms ++ yLowTerms)
+
+supPosPosition :: SupPos -> Point
+supPosPosition (SupPos (x, y) xOffset) = (fromIntegral x + xOffset, fromIntegral y + (1+playerHeight)/2)
