@@ -168,8 +168,12 @@ playerTrajectory mov = let
     xLowTerms = [vx, x]
     yLowTerms = [vy, y]
     (xHighTerms, yHighTerms) = case mov of
-        Grounded _ _ (Just HLeft)  -> ([-aRun], [])
-        Grounded _ _ (Just HRight) -> ([ aRun], [])
+        Grounded _ _ (Just HLeft)
+            |vx == -vRunMax -> ([],[])
+            |otherwise ->  ([-aRun], [])
+        Grounded _ _ (Just HRight)
+            |vx == vRunMax -> ([],[])
+            |otherwise ->  ([aRun], [])
         Grounded _ _  Nothing -> case compare vx 0 of
                                   GT -> ([-aRun/2], [])
                                   EQ -> ([], [])

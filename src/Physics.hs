@@ -218,24 +218,39 @@ nonCollisionTransition :: PlayerMovement -> Reader World (Maybe (Time, PlayerMov
 nonCollisionTransition mov@(Grounded _ 0 Nothing) = return Nothing
 nonCollisionTransition mov@(Grounded (SupPos (x,y) _) vx dir) = do
   let tChange = case dir of
-          Nothing -> abs vx/aRun
-          Just (HLeft)  -> (vx + vRunMax) / aRun
-          Just (HRight) -> (vRunMax - vx) / aRun
+          Nothing -> Just $ abs vx/aRun
+          Just (HLeft)
+              | vx == -vRunMax -> Nothing
+              | otherwise -> Just $ (vx + vRunMax) / aRun
+          Just (HRight)
+              | vx == vRunMax -> Nothing
+              | otherwise -> Just $ (vRunMax - vx) / aRun
       trajectory = playerTrajectory mov
   (leftBound , _) <- walkBlocks (first (subtract 1)) (x,y)
   (rightBound, _) <- walkBlocks (first (+1)        ) (x,y)
-  let leftRunoff  = minimumMay $ map snd $ xint (fromIntegral leftBound  - (1 + playerWidth)/2) trajectory
-      rightRunoff = minimumMay $ map snd $ xint (fromIntegral rightBound + (1 + playerWidth)/2) trajectory
-  let firstRunoff = minimumMay $ catMaybes [leftRunoff, rightRunoff]
-  case firstRunoff of
-    Just tRunoff
-      |tRunoff <= tChange-> let
-        newTrajectory = atT tRunoff trajectory
-        in return $ Just (tRunoff, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
-    Nothing -> do
-      let newTrajectory = atT tChange trajectory
-      newSupPos <- fromMaybe (error "Support expected but missing") <$> checkSupport (startPoint newTrajectory)
-      return $ Just $ (tChange, Grounded newSupPos 0 Nothing)
+  let leftRunoff  = minimumMay $ map snd $ yint (fromIntegral leftBound  - (1 + playerWidth)/2) trajectory
+      rightRunoff = minimumMay $ map snd $ yint (fromIntegral rightBound + (1 + playerWidth)/2) trajectory
+      firstRunoff = minimumMay $ filter (>=0) $ catMaybes [leftRunoff, rightRunoff]
+      handleRunoff t = let
+        newTrajectory = atT t trajectory
+        in return $ Just (t, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
+      handleTrajectoryChange t = do
+          let newTrajectory = atT t trajectory
+          newSupPos <- fromMaybe (error "Support expected but missing")
+                    <$> checkSupport (startPoint newTrajectory)
+          return $ case dir of
+                     Nothing -> Just $ (t, Grounded newSupPos 0 Nothing)
+                     Just (HLeft) -> Just $ (t, Grounded newSupPos (-vRunMax) $ Just HLeft)
+                     Just (HRight) -> Just $ (t, Grounded newSupPos vRunMax $ Just HRight)
+  case (firstRunoff,tChange) of
+      (Just tr, Just tc)
+          |tr < tc -> handleRunoff tr
+          |otherwise -> handleTrajectoryChange tc
+      (Just tr, Nothing) -> handleRunoff tr
+      (Nothing, Just tc) -> handleTrajectoryChange tc
+      (Nothing, Nothing) -> return Nothing
+
+
 nonCollisionTransition Falling{} = return Nothing
 nonCollisionTransition mov@(Jumping _ _ aJump) = return $ do
     t <- jumpEndTime aJump jumpJerk
@@ -254,7 +269,7 @@ nextTransition t mov = do
                         Nothing -> return Nothing
                         Just collision -> Just <$> afterCollision collision mov
   maybeNCTransition <- nonCollisionTransition mov
-  return $ minimumByMay (comparing fst) $ filter ((<t) . fst) $ catMaybes [maybeCTransition, maybeNCTransition]
+  return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $ catMaybes [maybeCTransition, maybeNCTransition]
 
 killVx :: PlayerMovement -> PlayerMovement
 killVx (Grounded support _ dir) = Grounded support 0 dir
@@ -267,7 +282,11 @@ absorbTrajectory t trajectory mov = do
     let pt = startPoint trajectory
         (vx, vy) = startVelocity trajectory
     maybeSupport <- checkSupport pt
-    let support = fromMaybe (error "Attempted to absorb trajectory after running off edge") maybeSupport
+    let support = flip fromMaybe maybeSupport $ error $
+          "Attempted to absorb trajectory after running off edge"
+            ++ "\nTime: " ++ show t
+            ++ "\nTrajectory: " ++ show trajectory
+            ++ "\nPlayerMovement: " ++ show mov
     return $ case mov of
              Falling{} -> Falling pt (vx, vy)
              NewlyFalling _ _ tJump
