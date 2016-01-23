@@ -54,6 +54,10 @@ handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
         Nothing -> cycleBlock (roundToIntPoint pt)
 handleEvent (EventKey (SpecialKey KeySpace) Down _ _ ) = player.playerMovement%~jump
 handleEvent (EventKey (SpecialKey KeySpace) Up _ _ ) = player.playerMovement%~unJump
+handleEvent (EventKey (SpecialKey KeyRight) Down _ _ ) = player.playerMovement%~runRight
+handleEvent (EventKey (SpecialKey KeyRight) Up _ _ ) = player.playerMovement%~stopRight
+handleEvent (EventKey (SpecialKey KeyLeft) Down _ _ ) = player.playerMovement%~runLeft
+handleEvent (EventKey (SpecialKey KeyLeft) Up _ _ ) = player.playerMovement%~stopLeft
 handleEvent _ = id
 
 linkTester :: Point -> LinkKey -> Reader World (Maybe LinkKey)

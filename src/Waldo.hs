@@ -180,8 +180,25 @@ stepWorld dt = execState (stepWorld' $ dt/1) where
 jump :: PlayerMovement -> PlayerMovement
 jump mov@(Falling{}) = mov
 jump mov@(Jumping{}) = mov
-jump mov = traceShowId $ Jumping (mov^.playerLoc) (mov^.playerVel._1, vJump) aJump0
+jump mov = Jumping (mov^.playerLoc) (mov^.playerVel._1, vJump) aJump0
 
 unJump :: PlayerMovement -> PlayerMovement
 unJump mov@(Jumping{}) = Falling (mov^.playerLoc) (mov^.playerVel)
 unJump mov = mov
+
+runRight :: PlayerMovement -> PlayerMovement
+runRight (Grounded support vx _) = Grounded support vx $ Just HRight
+runRight mov = mov
+
+runLeft :: PlayerMovement -> PlayerMovement
+runLeft (Grounded support vx _) = Grounded support vx $ Just HLeft
+runLeft mov = mov
+
+stopRight :: PlayerMovement -> PlayerMovement
+stopRight (Grounded support vx (Just HRight)) = Grounded support vx Nothing
+stopRight mov = mov
+
+stopLeft :: PlayerMovement -> PlayerMovement
+stopLeft (Grounded support vx (Just HLeft)) = Grounded support vx Nothing
+stopLeft mov = mov
+
