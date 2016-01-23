@@ -23,13 +23,13 @@ blockSize :: Float
 blockSize = 0.95
 
 g :: Float
-g = -1
+g = -20
 
 jumpJerk, aJump0, vJump :: Float
 (jumpJerk, aJump0, vJump) = traceShowId $ let
     jumpMaxHeight = 2.2
     jumpMinHeight = 0.2
-    jumpMaxTime   = 0.6
+    jumpMaxTime   = 0.3
     vJump' = sqrt $ -2 * jumpMinHeight * g
     aJump0' = ( 2 * sqrt (18 * g * (jumpMinHeight - jumpMaxHeight) + (3 * vJump' + jumpMaxTime * g)^2)
              - 2 * jumpMaxTime * g  - 6 * vJump') / (3 * jumpMaxTime)
@@ -37,13 +37,13 @@ jumpJerk, aJump0, vJump :: Float
     in (jumpJerk', aJump0', vJump')
 
 vRunMax :: Float
-vRunMax = 1
+vRunMax = 2.5
 
 jumpGraceTime :: Float
-jumpGraceTime = 1
+jumpGraceTime = 0.3
 
 aRun :: Float
-aRun = 1
+aRun = 15
 
 type IntPt = (Int,Int)
 
