@@ -228,12 +228,12 @@ nonCollisionTransition mov@(Grounded (SupPos (x,y) _) vx dir) = do
       trajectory = playerTrajectory mov
   (leftBound , _) <- walkBlocks (first (subtract 1)) (x,y)
   (rightBound, _) <- walkBlocks (first (+1)        ) (x,y)
-  let leftRunoff  = minimumMay $ map snd $ yint (fromIntegral leftBound  - (1 + playerWidth)/2) trajectory
-      rightRunoff = minimumMay $ map snd $ yint (fromIntegral rightBound + (1 + playerWidth)/2) trajectory
-      firstRunoff = minimumMay $ filter (>=0) $ catMaybes [leftRunoff, rightRunoff]
+  let leftRunoffs  = yint (fromIntegral leftBound  - (1 + playerWidth)/2) trajectory
+      rightRunoffs = yint (fromIntegral rightBound + (1 + playerWidth)/2) trajectory
+      firstRunoff = minimumMay $ filter (>=0) $ map snd $ leftRunoffs ++ rightRunoffs
       handleRunoff t = let
         newTrajectory = atT t trajectory
-        in return $ Just (t, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
+        in return $ Just (t, NewlyFalling (startPoint newTrajectory) (startVelocity newTrajectory) jumpGraceTime)
       handleTrajectoryChange t = do
           let newTrajectory = atT t trajectory
           newSupPos <- fromMaybe (error "Support expected but missing")
