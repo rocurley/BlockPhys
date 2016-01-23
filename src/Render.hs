@@ -39,10 +39,13 @@ renderWorld = do
     stressPictures <- fmap Pictures $ mapM renderBlockStress =<< view (blocks.to Map2D.keys)
     linkPictures   <- Pictures <$> map renderLink <$> H.toList <$> view links
     playerPicture  <- renderPlayer <$> view player
+    renderFuture <- isJust <$> view (keysToggled.at (Char 'f'))
     futurePlayers <- traverse (\ t -> do
         ((playerMovement%~unJump) <$> view player) >>= playerMovement (timeEvolvePlayerMovement t)
-        ) [0,0.1..5]
-    let playerFuturePictures = Pictures $ renderPlayer <$> futurePlayers
+        ) [0,5/60..2]
+    let playerFuturePictures = if renderFuture
+                               then Pictures $ renderPlayer <$> futurePlayers
+                               else Blank
     let debug = scale scaleFactor scaleFactor $ Pictures
                   [Line [(0,0),(1,1)],Line [(0,1),(1,0)], Line [(0,0),(1,0),(1,1),(0,1),(0,0)]]
     let grid = Scale scaleFactor scaleFactor $ Pictures $

@@ -6,6 +6,8 @@ import Graphics.Gloss.Interface.Pure.Game
 
 import qualified Data.Map as H hiding (Map)
 import Data.Map (Map)
+import qualified Data.Set as Set hiding (Set)
+import Data.Set (Set)
 import Control.Lens
 import Test.QuickCheck.Arbitrary
 import Test.QuickCheck.Gen
@@ -117,13 +119,17 @@ instance Arbitrary PlayerMovement where
       2 -> NewlyFalling (0,0) <$> arbitrary <*> (abs <$> arbitrary)
       _ -> error "Out of bounds random movement constructor"
 
-data World = World {_blocks :: BlockMap,
-                    _links :: LinkMap,
-                    _cCons :: CConMap,
-                    _cCis :: [Int],
-                    _player :: Player}
+data World = World {_blocks :: BlockMap
+                   ,_links :: LinkMap
+                   ,_cCons :: CConMap
+                   ,_cCis :: [Int]
+                   ,_player :: Player
+                   ,_keysPressed :: Set Key
+                   ,_keysToggled :: Set Key
+                   }
 
-emptyWorld initialPlayer = World Map2D.empty H.empty H.empty [0..] initialPlayer
+emptyWorld :: Player -> World
+emptyWorld initialPlayer = World Map2D.empty H.empty H.empty [0..] initialPlayer Set.empty Set.empty
 
 makeLenses ''World
 makeLenses ''BlockVal
