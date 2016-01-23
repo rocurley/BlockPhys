@@ -30,13 +30,10 @@ jumpJerk, aJump0, vJump :: Float
     jumpMaxHeight = 2.2
     jumpMinHeight = 0.2
     jumpMaxTime   = 0.6
-    vJump' = sqrt (-2 * jumpMinHeight * g)
-    aJump0' = 2 * (-jumpMaxTime * g - 3 * vJump' +
-      sqrt (g * (-18 * jumpMaxHeight + jumpMaxTime * (jumpMaxTime * g + 6 *vJump'))))/(3 * jumpMaxTime)
-    jumpJerk' = -aJump0' / jumpMaxTime
-    --jumpJerk = 6 * (sqrt (-2 * jumpMinHeight * g) * jumpMaxTime - 2 * jumpMaxHeight)/jumpMaxTime^3
-    --aJump = 6 * jumpMaxHeight / jumpMaxTime^2 - g - 4 * sqrt (-2 * g * jumpMinHeight) /jumpMaxTime
-    --vJump = sqrt (-2 * jumpMinHeight * g)
+    vJump' = sqrt $ -2 * jumpMinHeight * g
+    aJump0' = ( 2 * sqrt (18 * g * (jumpMinHeight - jumpMaxHeight) + (3 * vJump' + jumpMaxTime * g)^2)
+             - 2 * jumpMaxTime * g  - 6 * vJump') / (3 * jumpMaxTime)
+    jumpJerk' = - aJump0'/jumpMaxTime
     in (jumpJerk', aJump0', vJump')
 
 vRunMax :: Float
@@ -115,7 +112,7 @@ instance Arbitrary PlayerMovement where
   arbitrary = do
     n <- choose (0 :: Int ,2)
     case n of
-      0 -> Jumping (0,0) <$> arbitrary <*> arbitrary
+      0 -> Jumping (0,0) <$> arbitrary <*> (abs <$> arbitrary)
       1 -> Falling (0,0) <$> arbitrary
       2 -> NewlyFalling (0,0) <$> arbitrary <*> (abs <$> arbitrary)
       _ -> error "Out of bounds random movement constructor"
@@ -172,17 +169,17 @@ playerTrajectory mov = let
     (xHighTerms, yHighTerms) = case mov of
         Grounded _ _ (Just HLeft)
             |vx == -vRunMax -> ([],[])
-            |otherwise ->  ([-aRun], [])
+            |otherwise ->  ([-aRun/2], [])
         Grounded _ _ (Just HRight)
             |vx == vRunMax -> ([],[])
-            |otherwise ->  ([aRun], [])
+            |otherwise ->  ([aRun/2], [])
         Grounded _ _  Nothing -> case compare vx 0 of
                                   GT -> ([-aRun/2], [])
                                   EQ -> ([], [])
                                   LT -> ([ aRun/2], [])
         Jumping _ _ aJump -> ([], [jumpJerk/6, (aJump + g)/2])
-        Falling _ _ -> ([],[g])
-        NewlyFalling _ _ _ -> ([],[g])
+        Falling _ _ -> ([],[g/2])
+        NewlyFalling _ _ _ -> ([],[g/2])
     in PolyTrajectory (poly BE $ xHighTerms ++ xLowTerms) (poly BE $ yHighTerms ++ yLowTerms)
 
 supPosPosition :: SupPos -> Point

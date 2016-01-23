@@ -211,7 +211,7 @@ afterCollision (Collision _ t _ dir) mov = let
          (UpDir, _) -> do
             support <- fromMaybe (error "No support yet hit top surface") <$> checkSupport pt
             return (t, Grounded support vx Nothing) -- That Nothing could cause problems later
-         (_, _) -> (t,) <$> killVx <$> absorbTrajectory t newTrajectory mov
+         (_, _) -> (t,) <$> killVx dir <$> absorbTrajectory t newTrajectory mov
 
 nonCollisionTransition :: PlayerMovement -> Reader World (Maybe (Time, PlayerMovement))
 --Here we assume the starting state is valid.
@@ -271,11 +271,13 @@ nextTransition t mov = do
   maybeNCTransition <- nonCollisionTransition mov
   return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $ catMaybes [maybeCTransition, maybeNCTransition]
 
-killVx :: PlayerMovement -> PlayerMovement
-killVx (Grounded support _ dir) = Grounded support 0 dir
-killVx (Falling pt (_, vy)) = Falling pt (0, vy)
-killVx (NewlyFalling pt (_, vy) t) = NewlyFalling pt (0, vy) t
-killVx (Jumping pt (_, vy) aJump) = Jumping pt (0, vy) aJump
+killVx :: Direction -> PlayerMovement -> PlayerMovement
+killVx LfDir (Grounded support _ (Just HRight)) = Grounded support 0 Nothing
+killVx RtDir (Grounded support _ (Just HLeft)) = Grounded support 0 Nothing
+killVx _ (Grounded support _ dir) = Grounded support 0 dir
+killVx _ (Falling pt (_, vy)) = Falling pt (0, vy)
+killVx _ (NewlyFalling pt (_, vy) t) = NewlyFalling pt (0, vy) t
+killVx _ (Jumping pt (_, vy) aJump) = Jumping pt (0, vy) aJump
 
 absorbTrajectory :: Time -> Trajectory -> PlayerMovement -> Reader World PlayerMovement
 absorbTrajectory t trajectory mov = do
@@ -292,7 +294,7 @@ absorbTrajectory t trajectory mov = do
              NewlyFalling _ _ tJump
                | tJump < t -> error "Attempted to absorb trajectory after jump end"
                | otherwise -> NewlyFalling pt (vx, vy) (tJump - t)
-             Jumping _ _ aJump -> Jumping pt (vx, vy) (aJump - t * jumpJerk)
+             Jumping _ _ aJump -> Jumping pt (vx, vy) (aJump + t * jumpJerk)
              Grounded _ _ dir -> Grounded support vx dir
 
 checkSupport :: Point -> Reader World (Maybe SupPos)
