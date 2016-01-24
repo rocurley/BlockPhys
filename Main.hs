@@ -56,14 +56,14 @@ handleEvent (EventKey key Down _ _) = execState $ do
     keysPressed.at key.= Just ()
     keysToggled.at key%= maybe (Just ()) (const Nothing)
     case key of
-      SpecialKey KeySpace -> player.playerMovement%=jump
+      SpecialKey KeyUp    -> player.playerMovement%=jump
       SpecialKey KeyRight -> player.playerMovement%=runRight
       SpecialKey KeyLeft  -> player.playerMovement%=runLeft
       _ -> return ()
 handleEvent (EventKey key Up _ _) = execState $ do
     keysPressed.at key.= Nothing
     case key of
-      SpecialKey KeySpace -> player.playerMovement%=unJump
+      SpecialKey KeyUp    -> player.playerMovement%=unJump
       SpecialKey KeyRight -> player.playerMovement%=stopRight
       SpecialKey KeyLeft  -> player.playerMovement%=stopLeft
       _ -> return ()

@@ -12,6 +12,8 @@ import Control.Lens
 import Test.QuickCheck.Arbitrary
 import Test.QuickCheck.Gen
 
+import Control.Monad.Reader
+
 import Debug.Trace
 
 import Math.Polynomial
@@ -190,3 +192,13 @@ playerTrajectory mov = let
 
 supPosPosition :: SupPos -> Point
 supPosPosition (SupPos (x, y) xOffset) = (fromIntegral x + xOffset, fromIntegral y + (1+playerHeight)/2)
+
+inputRunDirection :: Reader World (Maybe HDir)
+inputRunDirection = do
+    l <- view $ keysPressed.at (SpecialKey KeyLeft)
+    r <- view $ keysPressed.at (SpecialKey KeyRight)
+    return $ case (l,r) of
+             (Just _ , Just _ ) -> Nothing
+             (Just _ , Nothing) -> Just HLeft
+             (Nothing, Just _ ) -> Just HRight
+             (Nothing, Nothing) -> Nothing

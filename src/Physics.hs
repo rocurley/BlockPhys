@@ -210,7 +210,8 @@ afterCollision (Collision _ t _ dir) mov = let
          (DnDir, _) -> return (t, Falling pt (vx, 0))
          (UpDir, _) -> do
             support <- fromMaybe (error "No support yet hit top surface") <$> checkSupport pt
-            return (t, Grounded support vx Nothing) -- That Nothing could cause problems later
+            runDir <- inputRunDirection
+            return (t, Grounded support vx runDir)
          (_, _) -> (t,) <$> killVx dir <$> absorbTrajectory t newTrajectory mov
 
 nonCollisionTransition :: PlayerMovement -> Reader World (Maybe (Time, PlayerMovement))
