@@ -200,9 +200,9 @@ walkBlocks step x = do
     Nothing -> return x
     Just _  -> walkBlocks step $ step x
 
-afterCollision :: Collision -> PlayerMovement -> Reader World (Time, PlayerMovement)
+afterCollision :: Collision -> Movement -> Reader World (Time, Movement)
 afterCollision (Collision _ t _ dir) mov = let
-    trajectory = playerTrajectory mov
+    trajectory = movTrajectory mov
     newTrajectory = atT t trajectory
     pt = startPoint newTrajectory
     (vx, vy) = startVelocity newTrajectory
@@ -214,7 +214,7 @@ afterCollision (Collision _ t _ dir) mov = let
             return (t, Grounded support vx runDir)
          (_, _) -> (t,) <$> killVx dir <$> absorbTrajectory t newTrajectory mov
 
-nonCollisionTransition :: PlayerMovement -> Reader World (Maybe (Time, PlayerMovement))
+nonCollisionTransition :: Movement -> Reader World (Maybe (Time, Movement))
 --Here we assume the starting state is valid.
 nonCollisionTransition mov@(Grounded _ 0 Nothing) = return Nothing
 nonCollisionTransition mov@(Grounded (SupPos (x,y) _) vx dir) = do
@@ -226,7 +226,7 @@ nonCollisionTransition mov@(Grounded (SupPos (x,y) _) vx dir) = do
           Just (HRight)
               | vx == vRunMax -> Nothing
               | otherwise -> Just $ (vRunMax - vx) / aRun
-      trajectory = playerTrajectory mov
+      trajectory = movTrajectory mov
   (leftBound , _) <- walkBlocks (first (subtract 1)) (x,y)
   (rightBound, _) <- walkBlocks (first (+1)        ) (x,y)
   let leftRunoffs  = yint (fromIntegral leftBound  - (1 + playerWidth)/2) trajectory
@@ -255,24 +255,24 @@ nonCollisionTransition mov@(Grounded (SupPos (x,y) _) vx dir) = do
 nonCollisionTransition Falling{} = return Nothing
 nonCollisionTransition mov@(Jumping _ _ aJump) = return $ do
     t <- jumpEndTime aJump jumpJerk
-    let trajectory = playerTrajectory mov
+    let trajectory = movTrajectory mov
         newTrajectory = atT t trajectory
     return $ (t, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
 nonCollisionTransition mov@(NewlyFalling _ _ t) = return $ Just $ let
-    trajectory = playerTrajectory mov
+    trajectory = movTrajectory mov
     newTrajectory = atT t trajectory
     in (t, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
 
-nextTransition :: Time -> PlayerMovement -> Reader World (Maybe (Time, PlayerMovement))
+nextTransition :: Time -> Movement -> Reader World (Maybe (Time, Movement))
 nextTransition t mov = do
-  maybeCollision <- predictCollision t $ playerTrajectory mov
+  maybeCollision <- predictCollision t $ movTrajectory mov
   maybeCTransition <- case maybeCollision of --lift is annoying
                         Nothing -> return Nothing
                         Just collision -> Just <$> afterCollision collision mov
   maybeNCTransition <- nonCollisionTransition mov
   return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $ catMaybes [maybeCTransition, maybeNCTransition]
 
-killVx :: Direction -> PlayerMovement -> PlayerMovement
+killVx :: Direction -> Movement -> Movement
 killVx LfDir (Grounded support _ (Just HRight)) = Grounded support 0 Nothing
 killVx RtDir (Grounded support _ (Just HLeft)) = Grounded support 0 Nothing
 killVx _ (Grounded support _ dir) = Grounded support 0 dir
@@ -280,7 +280,7 @@ killVx _ (Falling pt (_, vy)) = Falling pt (0, vy)
 killVx _ (NewlyFalling pt (_, vy) t) = NewlyFalling pt (0, vy) t
 killVx _ (Jumping pt (_, vy) aJump) = Jumping pt (0, vy) aJump
 
-absorbTrajectory :: Time -> Trajectory -> PlayerMovement -> Reader World PlayerMovement
+absorbTrajectory :: Time -> Trajectory -> Movement -> Reader World Movement
 absorbTrajectory t trajectory mov = do
     let pt = startPoint trajectory
         (vx, vy) = startVelocity trajectory
@@ -289,7 +289,7 @@ absorbTrajectory t trajectory mov = do
           "Attempted to absorb trajectory after running off edge"
             ++ "\nTime: " ++ show t
             ++ "\nTrajectory: " ++ show trajectory
-            ++ "\nPlayerMovement: " ++ show mov
+            ++ "\nMovement: " ++ show mov
     return $ case mov of
              Falling{} -> Falling pt (vx, vy)
              NewlyFalling _ _ tJump
@@ -319,8 +319,8 @@ checkSupport (x0, y0) = do
 
 --Passing the player as an argument instead of from the world makes
 --it much easier to define recursively.
-timeEvolvePlayerMovement :: Time -> PlayerMovement -> Reader World PlayerMovement
-timeEvolvePlayerMovement t mov = do
+timeEvolveMovement :: Time -> Movement -> Reader World Movement
+timeEvolveMovement t mov = do
     movChecked <- case mov of
               Grounded support vx dir -> do
                 let pt = supPosPosition support
@@ -329,8 +329,8 @@ timeEvolvePlayerMovement t mov = do
               _ -> return mov
     transition <- nextTransition t movChecked
     case transition of
-      Nothing -> absorbTrajectory t (atT t $ playerTrajectory movChecked) movChecked
-      Just (t', mov') -> timeEvolvePlayerMovement (t-t') mov'
+      Nothing -> absorbTrajectory t (atT t $ movTrajectory movChecked) movChecked
+      Just (t', mov') -> timeEvolveMovement (t-t') mov'
 
 predictDynamicCollision :: (Shape, Trajectory) -> (Shape, Trajectory) -> Maybe Time
 predictDynamicCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) = let
@@ -340,8 +340,8 @@ predictDynamicCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) = let
   collisions = join
       [ [t | ((x,y),t) <- yint    xTouchDist diffTrajectory, abs y <= yTouchDist]
       , [t | ((x,y),t) <- yint (-xTouchDist) diffTrajectory, abs y <= yTouchDist]
-      , [t | ((x,y),t) <- xint    yTouchDist diffTrajectory, abs x <= yTouchDist]
-      , [t | ((x,y),t) <- xint (-yTouchDist) diffTrajectory, abs x <= yTouchDist]
+      , [t | ((x,y),t) <- xint    yTouchDist diffTrajectory, abs x <= xTouchDist]
+      , [t | ((x,y),t) <- xint (-yTouchDist) diffTrajectory, abs x <= xTouchDist]
       ]
   in minimumMay $ filter (>0) collisions
 

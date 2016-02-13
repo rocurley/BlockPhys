@@ -86,7 +86,7 @@ type CConVal = Int
 type CCon = (CConKey,CConVal)
 type CConMap = Map CConKey CConVal
 
-newtype Player = Player {_playerMovement :: PlayerMovement} deriving (Show) --Will have other things later
+newtype Player = Player {_playerMovement :: Movement} deriving (Show) --Will have other things later
 instance Arbitrary Player where
   arbitrary = Player <$> arbitrary
 
@@ -104,15 +104,15 @@ Hell, only run the collision checker untill the transition in the first place.
 Given this:
 Trajectories become just the information the collision checker needs: no more.
 data Trajectory = PolyTrajectory (Poly Float) (Poly Float) --Probably this
-PlayerMovement handles the time, runoff (this is a bit fuzzy), and input transitions.
+Movement handles the time, runoff (this is a bit fuzzy), and input transitions.
 -}
 
-data PlayerMovement = Grounded SupPos Float (Maybe HDir)
-                    | Jumping Point Velocity Float --Jerk is implicit, accel does not include gravity
-                    | Falling Point Velocity
-                    | NewlyFalling Point Velocity Float
-                    deriving (Show)
-instance Arbitrary PlayerMovement where
+data Movement = Grounded SupPos Float (Maybe HDir)
+              | Jumping Point Velocity Float --Jerk is implicit, accel does not include gravity
+              | Falling Point Velocity
+              | NewlyFalling Point Velocity Float
+              deriving (Show)
+instance Arbitrary Movement where
   --This is bad and I should feel bad.
   arbitrary = do
     n <- choose (0 :: Int ,2)
@@ -149,30 +149,30 @@ possibleLinks (x,y) = H.fromList
                                   (DnDir, ((x,y-1),Link D2U (x  ,y-1))),
                                   (UpDir, ((x,y+1),Link D2U (x  ,y  )))]
 
-playerVel :: Getter PlayerMovement Velocity
-playerVel = to _playerVel where
-    _playerVel (Grounded _ vx _) = (vx, 0)
-    _playerVel (Jumping _ v _) = v
-    _playerVel (Falling _ v) = v
-    _playerVel (NewlyFalling _ v _) = v
+movVel :: Getter Movement Velocity
+movVel = to _movVel where
+    _movVel (Grounded _ vx _) = (vx, 0)
+    _movVel (Jumping _ v _) = v
+    _movVel (Falling _ v) = v
+    _movVel (NewlyFalling _ v _) = v
 
-playerLoc :: Getter PlayerMovement Point
-playerLoc = to _playerLoc
-_playerLoc :: PlayerMovement -> Point
-_playerLoc (Grounded supPos _ _) = supPosPosition supPos
-_playerLoc (Jumping pt _ _) = pt
-_playerLoc (Falling pt _) = pt
-_playerLoc (NewlyFalling pt _ _) = pt
+movLoc :: Getter Movement Point
+movLoc = to _movLoc
+_movLoc :: Movement -> Point
+_movLoc (Grounded supPos _ _) = supPosPosition supPos
+_movLoc (Jumping pt _ _) = pt
+_movLoc (Falling pt _) = pt
+_movLoc (NewlyFalling pt _ _) = pt
 
 playerWidth :: Float
 playerWidth = 0.4
 playerHeight :: Float
 playerHeight = 0.8
 
-playerTrajectory :: PlayerMovement -> Trajectory
-playerTrajectory mov = let
-    (x, y) = mov^.playerLoc
-    (vx, vy) = mov^.playerVel
+movTrajectory :: Movement -> Trajectory
+movTrajectory mov = let
+    (x, y) = mov^.movLoc
+    (vx, vy) = mov^.movVel
     xLowTerms = [vx, x]
     yLowTerms = [vy, y]
     (xHighTerms, yHighTerms) = case mov of

@@ -175,30 +175,30 @@ stepWorld :: Time -> World -> World
 stepWorld dt = execState (stepWorld' $ dt/1) where
   stepWorld' :: Time -> State World ()
   stepWorld' dt = do
-      get >>= (player.playerMovement $ asState . timeEvolvePlayerMovement dt) >>= put
+      get >>= (player.playerMovement $ asState . timeEvolveMovement dt) >>= put
 
-jump :: PlayerMovement -> PlayerMovement
+jump :: Movement -> Movement
 jump mov@(Falling{}) = mov
 jump mov@(Jumping{}) = mov
-jump mov = Jumping (mov^.playerLoc) (mov^.playerVel._1, vJump) aJump0
+jump mov = Jumping (mov^.movLoc) (mov^.movVel._1, vJump) aJump0
 
-unJump :: PlayerMovement -> PlayerMovement
-unJump mov@(Jumping{}) = Falling (mov^.playerLoc) (mov^.playerVel)
+unJump :: Movement -> Movement
+unJump mov@(Jumping{}) = Falling (mov^.movLoc) (mov^.movVel)
 unJump mov = mov
 
-runRight :: PlayerMovement -> PlayerMovement
+runRight :: Movement -> Movement
 runRight (Grounded support vx _) = Grounded support vx $ Just HRight
 runRight mov = mov
 
-runLeft :: PlayerMovement -> PlayerMovement
+runLeft :: Movement -> Movement
 runLeft (Grounded support vx _) = Grounded support vx $ Just HLeft
 runLeft mov = mov
 
-stopRight :: PlayerMovement -> PlayerMovement
+stopRight :: Movement -> Movement
 stopRight (Grounded support vx (Just HRight)) = Grounded support vx Nothing
 stopRight mov = mov
 
-stopLeft :: PlayerMovement -> PlayerMovement
+stopLeft :: Movement -> Movement
 stopLeft (Grounded support vx (Just HLeft)) = Grounded support vx Nothing
 stopLeft mov = mov
 

@@ -41,7 +41,7 @@ renderWorld = do
     playerPicture  <- renderPlayer <$> view player
     renderFuture <- isJust <$> view (keysToggled.at (Char 'f'))
     futurePlayers <- traverse (\ t -> do
-        ((playerMovement%~unJump) <$> view player) >>= playerMovement (timeEvolvePlayerMovement t)
+        ((playerMovement%~unJump) <$> view player) >>= playerMovement (timeEvolveMovement t)
         ) [0,5/60..2]
     let playerFuturePictures = if renderFuture
                                then Pictures $ renderPlayer <$> futurePlayers
@@ -137,6 +137,6 @@ renderPlayer player = let
             Jumping{} -> red
             Falling{} -> blue
             NewlyFalling{} -> orange
-  (x,y) = player^.playerMovement.playerLoc
+  (x,y) = player^.playerMovement.movLoc
   playerShape = Polygon [(0.2,0.4),(-0.2,0.4),(-0.2,-0.4),(0.2,-0.4)]
   in Color color $ Scale scaleFactor scaleFactor $ Translate x y playerShape
