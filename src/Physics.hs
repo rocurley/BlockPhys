@@ -331,3 +331,17 @@ timeEvolvePlayerMovement t mov = do
     case transition of
       Nothing -> absorbTrajectory t (atT t $ playerTrajectory movChecked) movChecked
       Just (t', mov') -> timeEvolvePlayerMovement (t-t') mov'
+
+predictDynamicCollision :: (Shape, Trajectory) -> (Shape, Trajectory) -> Maybe Time
+predictDynamicCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) = let
+  xTouchDist = (w1 + w2)/2
+  yTouchDist = (h1 + h2)/2
+  diffTrajectory = trajectoryDiff t1 t2
+  collisions = join
+      [ [t | ((x,y),t) <- yint    xTouchDist diffTrajectory, abs y <= yTouchDist]
+      , [t | ((x,y),t) <- yint (-xTouchDist) diffTrajectory, abs y <= yTouchDist]
+      , [t | ((x,y),t) <- xint    yTouchDist diffTrajectory, abs x <= yTouchDist]
+      , [t | ((x,y),t) <- xint (-yTouchDist) diffTrajectory, abs x <= yTouchDist]
+      ]
+  in minimumMay $ filter (>0) collisions
+

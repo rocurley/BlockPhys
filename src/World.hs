@@ -17,6 +17,7 @@ import Control.Monad.Reader
 import Debug.Trace
 
 import Math.Polynomial
+import Math.Polynomial.NumInstance
 
 import qualified Map2D as Map2D hiding (Map2D)
 import Map2D (Map2D)
@@ -202,3 +203,8 @@ inputRunDirection = do
              (Just _ , Nothing) -> Just HLeft
              (Nothing, Just _ ) -> Just HRight
              (Nothing, Nothing) -> Nothing
+
+data Shape = Rectangle{rectWidth :: Float, rectHeight :: Float}
+
+trajectoryDiff :: Trajectory -> Trajectory -> Trajectory
+trajectoryDiff (PolyTrajectory px1 py1) (PolyTrajectory px2 py2) = PolyTrajectory (px1 - px2) (py1 - py2)
