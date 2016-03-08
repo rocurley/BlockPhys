@@ -122,17 +122,20 @@ instance Arbitrary Movement where
       2 -> NewlyFalling (0,0) <$> arbitrary <*> (abs <$> arbitrary)
       _ -> error "Out of bounds random movement constructor"
 
+data Dynamic = FreeBlock Movement
+
 data World = World {_blocks :: BlockMap
                    ,_links :: LinkMap
                    ,_cCons :: CConMap
                    ,_cCis :: [Int]
                    ,_player :: Player
+                   ,_dynamics :: Set Dynamic
                    ,_keysPressed :: Set Key
                    ,_keysToggled :: Set Key
                    }
 
 emptyWorld :: Player -> World
-emptyWorld initialPlayer = World Map2D.empty H.empty H.empty [0..] initialPlayer Set.empty Set.empty
+emptyWorld initialPlayer = World Map2D.empty H.empty H.empty [0..] initialPlayer Set.empty Set.empty Set.empty
 
 makeLenses ''World
 makeLenses ''BlockVal

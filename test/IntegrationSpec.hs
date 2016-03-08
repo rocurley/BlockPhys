@@ -23,7 +23,7 @@ spec :: Spec
 spec = do
   describe "Players" $ do
     it "should stay in a box" $ within (10^5) $ property $ \ plr t -> let
-      world = addJail $ World Map2D.empty Map.empty Map.empty [0..] plr
+      world = addJail $ emptyWorld plr
       newWorld = stepWorld (abs t) world
-      (x,y) = newWorld^.player.playerMovement.playerLoc
+      (x,y) = newWorld^.player.playerMovement.movLoc
       in (abs x < 3) && (abs y < 3)

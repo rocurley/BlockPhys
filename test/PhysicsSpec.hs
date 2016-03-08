@@ -40,7 +40,7 @@ instance FuzzyEq Trajectory where
 instance FuzzyEq SupPos where
   s1 ~=~ s2 = supPosPosition s1 ~=~ supPosPosition s2
 
-instance FuzzyEq PlayerMovement where
+instance FuzzyEq Movement where
   Falling pt1 v1 ~=~ Falling pt2 v2 = and [pt1 ~=~ pt2, v1 ~=~ v2]
   NewlyFalling pt1 v1 t1 ~=~ NewlyFalling pt2 v2 t2 = and [pt1 ~=~ pt2, v1 ~=~ v2, t1 ~=~ t2]
   Jumping pt1 v1 a1 ~=~ Jumping pt2 v2 a2 = and [pt1 ~=~ pt2, v1 ~=~ v2, a1 ~=~ a2]
@@ -98,7 +98,7 @@ spec = do
     it "should be divisible" $
       property $ \ mov t1 t2-> t1 >= 0 && t2 >= 0 ==>
         flip runReader (emptyWorld $ Player mov) $ do
-            split <- timeEvolvePlayerMovement t2 =<< timeEvolvePlayerMovement t1 mov
-            atOnce <- timeEvolvePlayerMovement (t1 + t2) mov
+            split <- timeEvolveMovement t2 =<< timeEvolveMovement t1 mov
+            atOnce <- timeEvolveMovement (t1 + t2) mov
             return $ split ~=~ atOnce
 
