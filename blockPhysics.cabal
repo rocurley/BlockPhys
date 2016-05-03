@@ -23,7 +23,8 @@ library
                        Waldo,
                        Utils,
                        Map2D,
-                       PolynomialRoot
+                       PolynomialRoot,
+                       UnitVector
   default-extensions:  FlexibleContexts
   build-depends:       base >=4.7 && < 5,
                        gloss,
