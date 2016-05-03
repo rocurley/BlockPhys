@@ -41,7 +41,7 @@ renderWorld = do
     playerPicture  <- renderPlayer <$> view player
     renderFuture <- isJust <$> view (keysToggled.at (Char 'f'))
     futurePlayers <- traverse (\ t -> do
-        ((playerMovement%~unJump) <$> view player) >>= playerMovement (timeEvolveMovement t)
+        ((playerMovement%~unJump) <$> view player) >>= playerMovement (timeEvolveMovement t playerShape)
         ) [0,5/60..2]
     let playerFuturePictures = if renderFuture
                                then Pictures $ renderPlayer <$> futurePlayers

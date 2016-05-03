@@ -171,6 +171,8 @@ playerWidth :: Float
 playerWidth = 0.4
 playerHeight :: Float
 playerHeight = 0.8
+playerShape :: Shape
+playerShape = Rectangle playerWidth playerHeight
 
 movTrajectory :: Movement -> Trajectory
 movTrajectory mov = let
@@ -207,7 +209,9 @@ inputRunDirection = do
              (Nothing, Just _ ) -> Just HRight
              (Nothing, Nothing) -> Nothing
 
-data Shape = Rectangle{rectWidth :: Float, rectHeight :: Float}
+data Shape = Rectangle{rectWidth :: Float, rectHeight :: Float} deriving (Show, Eq, Ord)
+instance Arbitrary Shape where
+  arbitrary = Rectangle <$> arbitrary <*> arbitrary
 
 trajectoryDiff :: Trajectory -> Trajectory -> Trajectory
 trajectoryDiff (PolyTrajectory px1 py1) (PolyTrajectory px2 py2) = PolyTrajectory (px1 - px2) (py1 - py2)

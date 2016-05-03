@@ -166,10 +166,10 @@ trajectoryBox trajectory dt = let
     (xs,ys) = unzip $ map (startPoint . flip atT trajectory) ts
     in ((minimum xs,maximum xs),(minimum ys,maximum ys))
 
-predictCollision :: Time -> Trajectory -> Reader World (Maybe Collision)
-predictCollision dt trajectory = do
+predictStaticCollision :: Time -> (Shape,Trajectory) -> Reader World (Maybe Collision)
+predictStaticCollision dt (Rectangle width height, trajectory) = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
-    let (xTouchDist,yTouchDist) = ((playerWidth+1)/2,(playerHeight+1)/2)
+    let (xTouchDist,yTouchDist) = ((width+1)/2,(height+1)/2)
     blocksInBox <-
         Map2D.rangeInc
           (ceiling $ xmin - xTouchDist, ceiling $ ymin - yTouchDist)
@@ -263,9 +263,9 @@ nonCollisionTransition mov@(NewlyFalling _ _ t) = return $ Just $ let
     newTrajectory = atT t trajectory
     in (t, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
 
-nextTransition :: Time -> Movement -> Reader World (Maybe (Time, Movement))
-nextTransition t mov = do
-  maybeCollision <- predictCollision t $ movTrajectory mov
+nextTransition :: Time -> Shape -> Movement -> Reader World (Maybe (Time, Movement))
+nextTransition t shape mov = do
+  maybeCollision <- predictStaticCollision t (shape, movTrajectory mov)
   maybeCTransition <- case maybeCollision of --lift is annoying
                         Nothing -> return Nothing
                         Just collision -> Just <$> afterCollision collision mov
@@ -319,18 +319,18 @@ checkSupport (x0, y0) = do
 
 --Passing the player as an argument instead of from the world makes
 --it much easier to define recursively.
-timeEvolveMovement :: Time -> Movement -> Reader World Movement
-timeEvolveMovement t mov = do
+timeEvolveMovement :: Time -> Shape -> Movement -> Reader World Movement
+timeEvolveMovement t shape mov = do
     movChecked <- case mov of
               Grounded support vx dir -> do
                 let pt = supPosPosition support
                 support' <- checkSupport pt
                 return $ maybe (NewlyFalling pt (vx, 0) jumpGraceTime) (\s -> Grounded s vx dir) support'
               _ -> return mov
-    transition <- nextTransition t movChecked
+    transition <- nextTransition t shape movChecked
     case transition of
       Nothing -> absorbTrajectory t (atT t $ movTrajectory movChecked) movChecked
-      Just (t', mov') -> timeEvolveMovement (t-t') mov'
+      Just (t', mov') -> timeEvolveMovement (t-t') shape mov'
 
 predictDynamicCollision :: (Shape, Trajectory) -> (Shape, Trajectory) -> Maybe Time
 predictDynamicCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) = let

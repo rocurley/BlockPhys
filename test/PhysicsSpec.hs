@@ -69,11 +69,11 @@ spec = do
   --TODO: Add test that object is actually colliding when the collision is predicted.
   --TODO: Add test that time evolving in 2 parts is the same as in 1 part.
   --TODO: Add parity symmetry test.
-  describe "Physics.timeEvolvePlayerMovement" $ do
+  describe "Physics.timeEvolveMovement" $ do
     it "should be divisible" $
-      property $ \ mov t1 t2-> t1 >= 0 && t2 >= 0 ==>
+      property $ \ mov shape t1 t2-> t1 >= 0 && t2 >= 0 ==>
         flip runReader (emptyWorld $ Player mov) $ do
-            split <- timeEvolveMovement t2 =<< timeEvolveMovement t1 mov
-            atOnce <- timeEvolveMovement (t1 + t2) mov
+            split <- timeEvolveMovement t2 shape =<< timeEvolveMovement t1 shape mov
+            atOnce <- timeEvolveMovement (t1 + t2) shape mov
             return $ split ~=~ atOnce
 
