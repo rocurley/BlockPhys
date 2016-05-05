@@ -270,7 +270,7 @@ nextTransition t shape mov = do
                         Nothing -> return Nothing
                         Just collision -> Just <$> afterCollision collision mov
   maybeNCTransition <- nonCollisionTransition mov
-  return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $ catMaybes [maybeCTransition, maybeNCTransition]
+  return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $ catMaybes [maybeNCTransition, maybeCTransition]
 
 killVx :: Direction -> Movement -> Movement
 killVx LfDir (Grounded support _ (Just HRight)) = Grounded support 0 Nothing
