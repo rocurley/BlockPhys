@@ -202,3 +202,51 @@ stopLeft :: Movement -> Movement
 stopLeft (Grounded support vx (Just HLeft)) = Grounded support vx Nothing
 stopLeft mov = mov
 
+linkTester :: Point -> LinkKey -> Reader World (Maybe LinkKey)
+linkTester (x,y) linkKey = do
+    linkVal <- view $ links.at linkKey
+    return $ if inDiamond (x,y) && isJust linkVal
+             then Just linkKey
+             else Nothing
+
+inDiamond :: Point -> Bool
+inDiamond (x,y) = x'+y'<0.5 && x' < 0.2 && y' < 0.5
+    where
+        (x',y') = (abs $ (x-0.5)/0.8, abs $ y/0.8)
+
+linkClickCheck :: Point -> Reader World (Maybe LinkKey)
+linkClickCheck (x,y) = let
+    (xi,xrem) = divMod' (x/scaleFactor) 1
+    (yi,yrem) = divMod' (y/scaleFactor) 1
+    u = xrem + yrem -1
+    v = yrem - xrem
+    in case (compare u 0,compare v 0) of
+        (LT,LT) -> linkTester (xrem,yrem)   $ Link L2R (xi,yi)
+        (LT,GT) -> linkTester (yrem,xrem)   $ Link D2U (xi,yi)
+        (GT,LT) -> linkTester (yrem,1-xrem) $ Link D2U (xi+1,yi)
+        (GT,GT) -> linkTester (xrem,1-yrem) $ Link L2R (xi,yi+1)
+        _ -> return Nothing -- Nothing on the boundary
+
+handleEvent :: Event -> World -> World
+handleEvent (EventKey (MouseButton LeftButton) Down _ pt) = execState $ do
+    linkClicked <- asState $ linkClickCheck pt
+    case linkClicked of
+        Just linkKey -> toggleLink linkKey
+        Nothing -> cycleBlock (roundToIntPoint pt)
+handleEvent (EventKey key Down _ _) = execState $ do
+    keysPressed.at key.= Just ()
+    keysToggled.at key%= maybe (Just ()) (const Nothing)
+    case key of
+      SpecialKey KeyUp    -> player.playerMovement%=jump
+      SpecialKey KeyRight -> player.playerMovement%=runRight
+      SpecialKey KeyLeft  -> player.playerMovement%=runLeft
+      _ -> return ()
+handleEvent (EventKey key Up _ _) = execState $ do
+    keysPressed.at key.= Nothing
+    case key of
+      SpecialKey KeyUp    -> player.playerMovement%=unJump
+      SpecialKey KeyRight -> player.playerMovement%=stopRight
+      SpecialKey KeyLeft  -> player.playerMovement%=stopLeft
+      _ -> return ()
+handleEvent _ = id
+
