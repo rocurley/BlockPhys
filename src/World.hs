@@ -111,7 +111,7 @@ data Movement = Grounded SupPos Float (Maybe HDir)
               | Jumping Point Velocity Float --Jerk is implicit, accel does not include gravity
               | Falling Point Velocity
               | NewlyFalling Point Velocity Float
-              deriving (Show)
+              deriving (Show, Eq)
 instance Arbitrary Movement where
   --This is bad and I should feel bad.
   arbitrary = do

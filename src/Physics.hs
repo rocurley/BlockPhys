@@ -36,6 +36,8 @@ import PolynomialRoot
 import Map2D (Map2D)
 import qualified Map2D as Map2D hiding (Map2D)
 
+import Debug.Trace
+
 ident :: (Foreign.Storable.Storable a, Num a) => Int -> LA.Matrix a
 ident n = (n><n) $ cycle $ 1: replicate n 0
 
@@ -166,8 +168,8 @@ trajectoryBox trajectory dt = let
     (xs,ys) = unzip $ map (startPoint . flip atT trajectory) ts
     in ((minimum xs,maximum xs),(minimum ys,maximum ys))
 
-predictStaticCollision :: Time -> (Shape,Trajectory) -> Reader World (Maybe Collision)
-predictStaticCollision dt (Rectangle width height, trajectory) = do
+predictStaticCollisions :: Time -> (Shape,Trajectory) -> Reader World [Collision]
+predictStaticCollisions dt (Rectangle width height, trajectory) = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
     let (xTouchDist,yTouchDist) = ((width+1)/2,(height+1)/2)
     blocksInBox <-
@@ -175,23 +177,20 @@ predictStaticCollision dt (Rectangle width height, trajectory) = do
           (ceiling $ xmin - xTouchDist, ceiling $ ymin - yTouchDist)
           (floor $ xmax + xTouchDist, floor $ ymax + yTouchDist)
         <$> view blocks
-    let
-      collisions :: [Collision]
-      collisions = do
-        blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
-        let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
-        collision@(Collision _ ct _ _) <- join [
-            [Collision (cx,cy) ct blockKey UpDir |
-                ((cx, cy), ct) <- xint (yBlock + yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
-            [Collision (cx,cy) ct blockKey DnDir |
-                ((cx, cy), ct) <- xint (yBlock - yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
-            [Collision (cx,cy) ct blockKey RtDir |
-                ((cx, cy), ct) <- yint (xBlock + xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist],
-            [Collision (cx,cy) ct blockKey LfDir |
-                ((cx, cy), ct) <- yint (xBlock - xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist]]
-        guard (dt > ct && ct > 0)
-        return collision
-    return $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) collisions
+    return $ do
+      blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
+      let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
+      collision@(Collision _ ct _ _) <- join [
+          [Collision (cx,cy) ct blockKey UpDir |
+              ((cx, cy), ct) <- xint (yBlock + yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
+          [Collision (cx,cy) ct blockKey DnDir |
+              ((cx, cy), ct) <- xint (yBlock - yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
+          [Collision (cx,cy) ct blockKey RtDir |
+              ((cx, cy), ct) <- yint (xBlock + xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist],
+          [Collision (cx,cy) ct blockKey LfDir |
+              ((cx, cy), ct) <- yint (xBlock - xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist]]
+      guard (dt > ct && ct >= 0)
+      return collision
 
 walkBlocks :: (IntPt -> IntPt) -> IntPt -> Reader World IntPt
 walkBlocks step x = do
@@ -265,12 +264,13 @@ nonCollisionTransition mov@(NewlyFalling _ _ t) = return $ Just $ let
 
 nextTransition :: Time -> Shape -> Movement -> Reader World (Maybe (Time, Movement))
 nextTransition t shape mov = do
-  maybeCollision <- predictStaticCollision t (shape, movTrajectory mov)
-  maybeCTransition <- case maybeCollision of --lift is annoying
-                        Nothing -> return Nothing
-                        Just collision -> Just <$> afterCollision collision mov
+  -- Add a check to remove "wrong-way" collisions.
+  -- Maybe should be in predictStaticCollisions.
+  collisions <- predictStaticCollisions t (shape, movTrajectory mov)
+  collisionTransitions <- filter (/= (0,mov)) <$> traverse (`afterCollision` mov) collisions
   maybeNCTransition <- nonCollisionTransition mov
-  return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $ catMaybes [maybeNCTransition, maybeCTransition]
+  return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $
+      maybeToList maybeNCTransition ++ collisionTransitions
 
 killVx :: Direction -> Movement -> Movement
 killVx LfDir (Grounded support _ (Just HRight)) = Grounded support 0 Nothing
