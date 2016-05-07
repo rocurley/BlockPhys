@@ -40,7 +40,7 @@ main = play displayMode white 60
 displayMode :: Display
 displayMode = InWindow "Hello World" (560,560) (1000,50)
 initialPlayer :: Player
-initialPlayer = Player $ Grounded (SupPos (-3, -3) 0) 0 (Just HRight)
+initialPlayer = Player $ Grounded (SupPos (-3, -3) 0) 0 Nothing
 --initialPlayer = Player $ Jumping (0, (1 + playerHeight)/2) (1,0) 5
 --initialPlayer = Player $ Falling (0.0,3.0) (1,1)
 initialWorld :: World
