@@ -122,7 +122,7 @@ stressFromLinks = foldMap toStress where
                 LfDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,1,0])
             in Stress $ konst up*upMat+konst right*rightMat+konst rotCCW*rotCCWMat
 type Time = Float
-data Collision  = Collision Point Time IntPt Direction deriving (Show,Eq,Ord)
+data Collision  = Collision Trajectory Time IntPt Direction deriving (Show,Eq)
 
 blockStress :: IntPt -> Reader World Stress
 blockStress key = do
@@ -148,15 +148,15 @@ jumpEndTime aJump jerk = case compare (aJump*jerk) 0 of
                            GT -> Nothing
                            LT -> Just $ -aJump/jerk
 
-xint :: Float -> Trajectory -> [(Point,Time)]
+xint :: Float -> Trajectory -> [(Trajectory,Time)]
 xint lineY trajectory@(PolyTrajectory _ py) = let
   p = addPoly py $ constPoly (-lineY)
-  in [(startPoint $ atT t trajectory,t)|t <- findRoots p]
+  in [(atT t trajectory,t)|t <- findRoots p]
 
-yint :: Float -> Trajectory -> [(Point,Time)]
+yint :: Float -> Trajectory -> [(Trajectory,Time)]
 yint lineX trajectory@(PolyTrajectory px _) = let
   p = addPoly px $ constPoly (-lineX)
-  in [(startPoint $ atT t trajectory,t)|t <- findRoots p]
+  in [(atT t trajectory,t)|t <- findRoots p]
 
 --Note that this doesn't get critical points in the past.
 criticalPoints :: Trajectory -> [Time]
@@ -167,6 +167,15 @@ trajectoryBox trajectory dt = let
     ts = 0:dt: filter (<dt) (criticalPoints trajectory)
     (xs,ys) = unzip $ map (startPoint . flip atT trajectory) ts
     in ((minimum xs,maximum xs),(minimum ys,maximum ys))
+
+leadingDerivativeSignPoly :: (Ord a, Num a) => Poly a -> Ordering
+leadingDerivativeSignPoly = mconcat . map (`compare` 0) . tailSafe . polyCoeffs LE
+
+leadingDerivativeSignTrajectory :: Direction -> Trajectory -> Ordering
+leadingDerivativeSignTrajectory RtDir (PolyTrajectory px py) = leadingDerivativeSignPoly px
+leadingDerivativeSignTrajectory LfDir (PolyTrajectory px py) = leadingDerivativeSignPoly $ negatePoly px
+leadingDerivativeSignTrajectory UpDir (PolyTrajectory px py) = leadingDerivativeSignPoly py
+leadingDerivativeSignTrajectory DnDir (PolyTrajectory px py) = leadingDerivativeSignPoly $ negatePoly py
 
 predictStaticCollisions :: Time -> (Shape,Trajectory) -> Reader World [Collision]
 predictStaticCollisions dt (Rectangle width height, trajectory) = do
@@ -180,16 +189,19 @@ predictStaticCollisions dt (Rectangle width height, trajectory) = do
     return $ do
       blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
       let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
-      collision@(Collision _ ct _ _) <- join [
-          [Collision (cx,cy) ct blockKey UpDir |
-              ((cx, cy), ct) <- xint (yBlock + yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
-          [Collision (cx,cy) ct blockKey DnDir |
-              ((cx, cy), ct) <- xint (yBlock - yTouchDist) trajectory, abs(xBlock-cx) < xTouchDist],
-          [Collision (cx,cy) ct blockKey RtDir |
-              ((cx, cy), ct) <- yint (xBlock + xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist],
-          [Collision (cx,cy) ct blockKey LfDir |
-              ((cx, cy), ct) <- yint (xBlock - xTouchDist) trajectory, abs(yBlock-cy) < yTouchDist]]
-      guard (dt > ct && ct >= 0)
+      collision@(Collision ctraj ct _ dir) <- join [
+          [Collision ctraj ct blockKey UpDir | (ctraj, ct) <- xint (yBlock + yTouchDist) trajectory],
+          [Collision ctraj ct blockKey DnDir | (ctraj, ct) <- xint (yBlock - yTouchDist) trajectory],
+          [Collision ctraj ct blockKey RtDir | (ctraj, ct) <- yint (xBlock + xTouchDist) trajectory],
+          [Collision ctraj ct blockKey LfDir | (ctraj, ct) <- yint (xBlock - xTouchDist) trajectory]]
+      guard $ dt > ct && ct >= 0
+      guard $ leadingDerivativeSignTrajectory dir ctraj == LT
+      let (cx, cy) = startPoint ctraj
+      guard $ case dir of
+        UpDir -> abs(xBlock-cx) < xTouchDist
+        DnDir -> abs(xBlock-cx) < xTouchDist
+        RtDir -> abs(yBlock-cy) < yTouchDist
+        LfDir -> abs(yBlock-cy) < yTouchDist
       return collision
 
 walkBlocks :: (IntPt -> IntPt) -> IntPt -> Reader World IntPt
@@ -331,17 +343,4 @@ timeEvolveMovement t shape mov = do
     case transition of
       Nothing -> absorbTrajectory t (atT t $ movTrajectory movChecked) movChecked
       Just (t', mov') -> timeEvolveMovement (t-t') shape mov'
-
-predictDynamicCollision :: (Shape, Trajectory) -> (Shape, Trajectory) -> Maybe Time
-predictDynamicCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) = let
-  xTouchDist = (w1 + w2)/2
-  yTouchDist = (h1 + h2)/2
-  diffTrajectory = trajectoryDiff t1 t2
-  collisions = join
-      [ [t | ((x,y),t) <- yint    xTouchDist diffTrajectory, abs y <= yTouchDist]
-      , [t | ((x,y),t) <- yint (-xTouchDist) diffTrajectory, abs y <= yTouchDist]
-      , [t | ((x,y),t) <- xint    yTouchDist diffTrajectory, abs x <= xTouchDist]
-      , [t | ((x,y),t) <- xint (-yTouchDist) diffTrajectory, abs x <= xTouchDist]
-      ]
-  in minimumMay $ filter (>0) collisions
 
