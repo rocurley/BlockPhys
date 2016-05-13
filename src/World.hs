@@ -134,6 +134,9 @@ data World = World {_blocks :: BlockMap
                    ,_keysToggled :: Set Key
                    }
 
+--Naming things is hard...
+data SolidObject = SolidPlayer | SolidBlock IntPt deriving (Show, Eq)
+
 emptyWorld :: Player -> World
 emptyWorld initialPlayer = World Map2D.empty H.empty H.empty [0..] initialPlayer Set.empty Set.empty Set.empty
 
@@ -215,3 +218,6 @@ instance Arbitrary Shape where
 
 trajectoryDiff :: Trajectory -> Trajectory -> Trajectory
 trajectoryDiff (PolyTrajectory px1 py1) (PolyTrajectory px2 py2) = PolyTrajectory (px1 - px2) (py1 - py2)
+
+staticTrajectory :: Point -> Trajectory
+staticTrajectory (x,y) = (PolyTrajectory (poly LE [x]) (poly LE [y]))

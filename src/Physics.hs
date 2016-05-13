@@ -122,7 +122,7 @@ stressFromLinks = foldMap toStress where
                 LfDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,1,0])
             in Stress $ konst up*upMat+konst right*rightMat+konst rotCCW*rotCCWMat
 type Time = Float
-data Collision  = Collision Trajectory Time IntPt Direction deriving (Show,Eq)
+data Collision  = Collision Trajectory Time SolidObject Direction deriving (Show,Eq)
 
 blockStress :: IntPt -> Reader World Stress
 blockStress key = do
@@ -189,11 +189,12 @@ predictStaticCollisions dt (Rectangle width height, trajectory) = do
     return $ do
       blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
       let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
+      let collidingWith = SolidBlock blockKey
       collision@(Collision ctraj ct _ dir) <- join [
-          [Collision ctraj ct blockKey UpDir | (ctraj, ct) <- xint (yBlock + yTouchDist) trajectory],
-          [Collision ctraj ct blockKey DnDir | (ctraj, ct) <- xint (yBlock - yTouchDist) trajectory],
-          [Collision ctraj ct blockKey RtDir | (ctraj, ct) <- yint (xBlock + xTouchDist) trajectory],
-          [Collision ctraj ct blockKey LfDir | (ctraj, ct) <- yint (xBlock - xTouchDist) trajectory]]
+          [Collision ctraj ct collidingWith UpDir | (ctraj, ct) <- xint (yBlock + yTouchDist) trajectory],
+          [Collision ctraj ct collidingWith DnDir | (ctraj, ct) <- xint (yBlock - yTouchDist) trajectory],
+          [Collision ctraj ct collidingWith RtDir | (ctraj, ct) <- yint (xBlock + xTouchDist) trajectory],
+          [Collision ctraj ct collidingWith LfDir | (ctraj, ct) <- yint (xBlock - xTouchDist) trajectory]]
       guard $ dt > ct && ct >= 0
       guard $ leadingDerivativeSignTrajectory dir ctraj == LT
       let (cx, cy) = startPoint ctraj
@@ -203,6 +204,28 @@ predictStaticCollisions dt (Rectangle width height, trajectory) = do
         RtDir -> abs(yBlock-cy) < yTouchDist
         LfDir -> abs(yBlock-cy) < yTouchDist
       return collision
+
+predictCollision :: (Shape, Trajectory) -> (Shape, Trajectory) -> SolidObject -> [Collision]
+predictCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) collidingWith = let
+  xTouchDist = (w1 + w2)/2
+  yTouchDist = (h1 + h2)/2
+  diffTrajectory = trajectoryDiff t1 t2
+  in do
+    collision@(Collision ctraj ct _ dir) <- join [
+        [Collision ctraj ct collidingWith UpDir | (ctraj, ct) <- xint (  yTouchDist) diffTrajectory],
+        [Collision ctraj ct collidingWith DnDir | (ctraj, ct) <- xint (- yTouchDist) diffTrajectory],
+        [Collision ctraj ct collidingWith RtDir | (ctraj, ct) <- yint (  xTouchDist) diffTrajectory],
+        [Collision ctraj ct collidingWith LfDir | (ctraj, ct) <- yint (- xTouchDist) diffTrajectory]]
+    guard $ ct >= 0
+    guard $ leadingDerivativeSignTrajectory dir ctraj == LT
+    let (cx, cy) = startPoint ctraj
+    guard $ case dir of
+      UpDir -> abs cx < xTouchDist
+      DnDir -> abs cx < xTouchDist
+      RtDir -> abs cy < yTouchDist
+      LfDir -> abs cy < yTouchDist
+    return collision
+
 
 walkBlocks :: (IntPt -> IntPt) -> IntPt -> Reader World IntPt
 walkBlocks step x = do
@@ -276,8 +299,6 @@ nonCollisionTransition mov@(NewlyFalling _ _ t) = return $ Just $ let
 
 nextTransition :: Time -> Shape -> Movement -> Reader World (Maybe (Time, Movement))
 nextTransition t shape mov = do
-  -- Add a check to remove "wrong-way" collisions.
-  -- Maybe should be in predictStaticCollisions.
   collisions <- predictStaticCollisions t (shape, movTrajectory mov)
   collisionTransitions <- filter (/= (0,mov)) <$> traverse (`afterCollision` mov) collisions
   maybeNCTransition <- nonCollisionTransition mov
@@ -343,4 +364,3 @@ timeEvolveMovement t shape mov = do
     case transition of
       Nothing -> absorbTrajectory t (atT t $ movTrajectory movChecked) movChecked
       Just (t', mov') -> timeEvolveMovement (t-t') shape mov'
-
