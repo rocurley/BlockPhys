@@ -5,21 +5,12 @@ import Prelude hiding (foldr,foldl,mapM,mapM_,sequence,concatMap)
 
 import Graphics.Gloss.Interface.Pure.Game
 
-import Data.Fixed
-import Data.Maybe
-
 import Control.Monad.State.Strict hiding (mapM,mapM_)
 import Control.Monad.Reader hiding (mapM,mapM_)
-
-import qualified Data.Map as H
-
-import Control.Lens
 
 import World
 import Render
 import Waldo
-import Utils
-import qualified Map2D
 
 main :: IO ()
 main = play displayMode white 60
