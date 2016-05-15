@@ -12,6 +12,7 @@ import Fuzzy
 
 import Physics
 import World
+import Waldo
 
 main :: IO ()
 main = hspec spec
@@ -75,4 +76,11 @@ spec = do
             split <- timeEvolveMovement t2 shape =<< timeEvolveMovement t1 shape mov
             atOnce <- timeEvolveMovement (t1 + t2) shape mov
             return $ split ~=~ atOnce
+
+  describe "Physics.predictStaticCollisionsNEW" $ do
+    it "should replicate the behevior of the old collision checker" $
+      property $ \ t (shape, traj) -> (flip runReader $ addJail $ emptyWorld undefined) $ do
+          old <- predictStaticCollisions t (shape, traj)
+          new <- predictStaticCollisionsNEW t (shape, traj)
+          return $ new == old
 
