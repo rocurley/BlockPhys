@@ -205,6 +205,21 @@ predictStaticCollisions dt (Rectangle width height, trajectory) = do
         LfDir -> abs(yBlock-cy) < yTouchDist
       return collision
 
+predictStaticCollisionsNEW :: Time -> (Shape,Trajectory) -> Reader World [Collision]
+predictStaticCollisionsNEW dt (shape, trajectory) = do
+    let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
+    let ((boundLeft,boundDown),(boundRight,boundUp)) = boundingBox shape
+    blocksInBox <-
+        Map2D.rangeInc
+          (ceiling $ xmin + boundLeft - 0.5, ceiling $ ymin + boundDown - 0.5)
+          (floor $ xmax + boundRight + 0.5, floor $ ymax + boundUp + 0.5)
+        <$> view blocks
+    return $ do
+      blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
+      let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
+      let collidingWith = SolidBlock blockKey
+      predictCollision (shape, trajectory) (blockShape, staticTrajectory (xBlock,yBlock)) collidingWith
+
 predictCollision :: (Shape, Trajectory) -> (Shape, Trajectory) -> SolidObject -> [Collision]
 predictCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) collidingWith = let
   xTouchDist = (w1 + w2)/2

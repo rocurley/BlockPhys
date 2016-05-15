@@ -216,6 +216,11 @@ data Shape = Rectangle{rectWidth :: Float, rectHeight :: Float} deriving (Show, 
 instance Arbitrary Shape where
   arbitrary = Rectangle <$> arbitrary <*> arbitrary
 
+blockShape = Rectangle 1 1
+
+boundingBox :: Shape -> (Point, Point)
+boundingBox (Rectangle width height) = ((-width/2,-height/2),(width/2,height/2))
+
 trajectoryDiff :: Trajectory -> Trajectory -> Trajectory
 trajectoryDiff (PolyTrajectory px1 py1) (PolyTrajectory px2 py2) = PolyTrajectory (px1 - px2) (py1 - py2)
 
