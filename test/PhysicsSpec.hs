@@ -79,8 +79,8 @@ spec = do
 
   describe "Physics.predictStaticCollisionsNEW" $ do
     it "should replicate the behevior of the old collision checker" $
-      property $ \ t (shape, traj) -> (flip runReader $ addJail $ emptyWorld undefined) $ do
-          old <- predictStaticCollisions t (shape, traj)
-          new <- predictStaticCollisionsNEW t (shape, traj)
-          return $ new == old
+      property $ \ t traj object -> (flip runReader $ addJail $ emptyWorld undefined) $ do
+          old <- predictStaticCollisions t (objectShape object, traj)
+          new <- predictStaticCollisionsNEW t (object, traj)
+          return $ and $ zipWith (~=~) new old
 

@@ -1,6 +1,7 @@
 module Fuzzy where
 
 import World
+import Physics
 
 import Math.Polynomial
 
@@ -27,5 +28,8 @@ instance FuzzyEq Movement where
   Falling pt1 v1 ~=~ Falling pt2 v2 = and [pt1 ~=~ pt2, v1 ~=~ v2]
   NewlyFalling pt1 v1 t1 ~=~ NewlyFalling pt2 v2 t2 = and [pt1 ~=~ pt2, v1 ~=~ v2, t1 ~=~ t2]
   Jumping pt1 v1 a1 ~=~ Jumping pt2 v2 a2 = and [pt1 ~=~ pt2, v1 ~=~ v2, a1 ~=~ a2]
-  Grounded sup1 v1 dir1 ~=~ Grounded sup2 v2 dir2 = and [sup1 ~=~ sup1, v1 ~=~ v2, dir1 == dir2]
+  Grounded sup1 v1 dir1 ~=~ Grounded sup2 v2 dir2 = and [sup1 ~=~ sup2, v1 ~=~ v2, dir1 == dir2]
   _ ~=~ _ = False
+instance FuzzyEq Collision where
+  (Collision traj1 t1 obj1 dir1) ~=~ (Collision traj2 t2 obj2 dir2) =
+    (traj1 ~=~ traj2) && (t1 ~=~ t2) && (obj1 == obj2) && (dir1 == dir2)

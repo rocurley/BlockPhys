@@ -134,9 +134,6 @@ data World = World {_blocks :: BlockMap
                    ,_keysToggled :: Set Key
                    }
 
---Naming things is hard...
-data SolidObject = SolidPlayer | SolidBlock IntPt deriving (Show, Eq)
-
 emptyWorld :: Player -> World
 emptyWorld initialPlayer = World Map2D.empty H.empty H.empty [0..] initialPlayer Set.empty Set.empty Set.empty
 
@@ -214,9 +211,23 @@ inputRunDirection = do
 
 data Shape = Rectangle{rectWidth :: Float, rectHeight :: Float} deriving (Show, Eq, Ord)
 instance Arbitrary Shape where
-  arbitrary = Rectangle <$> arbitrary <*> arbitrary
+  arbitrary = Rectangle <$> fmap abs arbitrary <*> fmap abs arbitrary
 
 blockShape = Rectangle 1 1
+
+--Naming things is hard...
+data SolidObject = SolidPlayer | SolidBlock IntPt deriving (Show, Eq)
+instance Arbitrary SolidObject where
+  arbitrary = do
+    n <- choose (0 :: Int ,1)
+    case n of
+      0 -> return SolidPlayer
+      1 -> SolidBlock <$> arbitrary
+      _ -> error "Out of bounds random solidObject constructor"
+
+objectShape :: SolidObject -> Shape
+objectShape SolidPlayer = playerShape
+objectShape (SolidBlock _) = blockShape
 
 boundingBox :: Shape -> (Point, Point)
 boundingBox (Rectangle width height) = ((-width/2,-height/2),(width/2,height/2))

@@ -123,6 +123,7 @@ stressFromLinks = foldMap toStress where
             in Stress $ konst up*upMat+konst right*rightMat+konst rotCCW*rotCCWMat
 type Time = Float
 data Collision  = Collision Trajectory Time SolidObject Direction deriving (Show,Eq)
+data NewCollision  = NewCollision Time (SolidObject, Trajectory) (SolidObject, Trajectory) Direction deriving (Show,Eq)
 
 blockStress :: IntPt -> Reader World Stress
 blockStress key = do
@@ -205,10 +206,10 @@ predictStaticCollisions dt (Rectangle width height, trajectory) = do
         LfDir -> abs(yBlock-cy) < yTouchDist
       return collision
 
-predictStaticCollisionsNEW :: Time -> (Shape,Trajectory) -> Reader World [Collision]
-predictStaticCollisionsNEW dt (shape, trajectory) = do
+predictStaticCollisionsNEW :: Time -> (SolidObject, Trajectory) -> Reader World [Collision]
+predictStaticCollisionsNEW dt (object, trajectory) = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
-    let ((boundLeft,boundDown),(boundRight,boundUp)) = boundingBox shape
+    let ((boundLeft,boundDown),(boundRight,boundUp)) = boundingBox $ objectShape object
     blocksInBox <-
         Map2D.rangeInc
           (ceiling $ xmin + boundLeft - 0.5, ceiling $ ymin + boundDown - 0.5)
@@ -218,29 +219,34 @@ predictStaticCollisionsNEW dt (shape, trajectory) = do
       blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
       let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
       let collidingWith = SolidBlock blockKey
-      predictCollision (shape, trajectory) (blockShape, staticTrajectory (xBlock,yBlock)) collidingWith
+      NewCollision t (o1,traj1) (o2,traj2) dir <-
+          predictCollisions (object, trajectory) (collidingWith, staticTrajectory (xBlock,yBlock))
+      return $ Collision traj1 t o2 dir
 
-predictCollision :: (Shape, Trajectory) -> (Shape, Trajectory) -> SolidObject -> [Collision]
-predictCollision (Rectangle w1 h1, t1) (Rectangle w2 h2, t2) collidingWith = let
-  xTouchDist = (w1 + w2)/2
-  yTouchDist = (h1 + h2)/2
-  diffTrajectory = trajectoryDiff t1 t2
-  in do
-    collision@(Collision ctraj ct _ dir) <- join [
-        [Collision ctraj ct collidingWith UpDir | (ctraj, ct) <- xint (  yTouchDist) diffTrajectory],
-        [Collision ctraj ct collidingWith DnDir | (ctraj, ct) <- xint (- yTouchDist) diffTrajectory],
-        [Collision ctraj ct collidingWith RtDir | (ctraj, ct) <- yint (  xTouchDist) diffTrajectory],
-        [Collision ctraj ct collidingWith LfDir | (ctraj, ct) <- yint (- xTouchDist) diffTrajectory]]
-    guard $ ct >= 0
-    guard $ leadingDerivativeSignTrajectory dir ctraj == LT
-    let (cx, cy) = startPoint ctraj
-    guard $ case dir of
-      UpDir -> abs cx < xTouchDist
-      DnDir -> abs cx < xTouchDist
-      RtDir -> abs cy < yTouchDist
-      LfDir -> abs cy < yTouchDist
-    return collision
-
+--TODO: This collsision contains the trajectory difference, which is not what
+--predictStaticCollisions expects.
+--I'm rewriting Collision again to have both objects.
+predictCollisions :: (SolidObject, Trajectory) -> (SolidObject, Trajectory) -> [NewCollision]
+predictCollisions (o1, t1) (o2, t2) = case (objectShape o1, objectShape o2) of
+  (Rectangle w1 h1, Rectangle w2 h2) -> let
+    xTouchDist = (w1 + w2)/2
+    yTouchDist = (h1 + h2)/2
+    diffTrajectory = trajectoryDiff t1 t2
+    in do
+      (dir, (ctraj, ct)) <- join [
+          (UpDir,) <$> xint (  yTouchDist) diffTrajectory,
+          (DnDir,) <$> xint (- yTouchDist) diffTrajectory,
+          (RtDir,) <$> yint (  xTouchDist) diffTrajectory,
+          (LfDir,) <$> yint (- xTouchDist) diffTrajectory]
+      guard $ ct >= 0
+      guard $ leadingDerivativeSignTrajectory dir ctraj == LT
+      let (cx, cy) = startPoint ctraj
+      guard $ case dir of
+        UpDir -> abs cx < xTouchDist
+        DnDir -> abs cx < xTouchDist
+        RtDir -> abs cy < yTouchDist
+        LfDir -> abs cy < yTouchDist
+      return $ NewCollision ct (o1, atT ct t1) (o2, atT ct t2) dir
 
 walkBlocks :: (IntPt -> IntPt) -> IntPt -> Reader World IntPt
 walkBlocks step x = do
