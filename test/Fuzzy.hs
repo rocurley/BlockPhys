@@ -31,5 +31,11 @@ instance FuzzyEq Movement where
   Grounded sup1 v1 dir1 ~=~ Grounded sup2 v2 dir2 = and [sup1 ~=~ sup2, v1 ~=~ v2, dir1 == dir2]
   _ ~=~ _ = False
 instance FuzzyEq Collision where
-  (Collision traj1 t1 obj1 dir1) ~=~ (Collision traj2 t2 obj2 dir2) =
-    (traj1 ~=~ traj2) && (t1 ~=~ t2) && (obj1 == obj2) && (dir1 == dir2)
+  (Collision t1 (objA1, trajA1) (objB1, trajB1) dir1) ~=~
+    (Collision t2 (objA2, trajA2) (objB2, trajB2) dir2)
+    = (t1 ~=~ t2)
+    && (objA1 == objA2)
+    && (objB1 == objB2)
+    && (trajA1 ~=~ trajA2)
+    && (trajB1 ~=~ trajB2)
+    && (dir1 == dir2)

@@ -175,7 +175,7 @@ stepWorld :: Time -> World -> World
 stepWorld dt = execState (stepWorld' $ dt/1) where
   stepWorld' :: Time -> State World ()
   stepWorld' dt = do
-      get >>= (player.playerMovement $ asState . timeEvolveMovement dt playerShape) >>= put
+      get >>= (player.playerMovement $ asState . timeEvolveMovement dt SolidPlayer) >>= put
 
 jump :: Movement -> Movement
 jump mov@(Falling{}) = mov

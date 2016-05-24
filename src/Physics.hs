@@ -122,8 +122,7 @@ stressFromLinks = foldMap toStress where
                 LfDir -> (matrix [0,1,0,0],matrix [1,0,0,0],matrix [0,0,1,0])
             in Stress $ konst up*upMat+konst right*rightMat+konst rotCCW*rotCCWMat
 type Time = Float
-data Collision  = Collision Trajectory Time SolidObject Direction deriving (Show,Eq)
-data NewCollision  = NewCollision Time (SolidObject, Trajectory) (SolidObject, Trajectory) Direction deriving (Show,Eq)
+data Collision  = Collision Time (SolidObject, Trajectory) (SolidObject, Trajectory) Direction deriving (Show,Eq)
 
 blockStress :: IntPt -> Reader World Stress
 blockStress key = do
@@ -178,36 +177,8 @@ leadingDerivativeSignTrajectory LfDir (PolyTrajectory px py) = leadingDerivative
 leadingDerivativeSignTrajectory UpDir (PolyTrajectory px py) = leadingDerivativeSignPoly py
 leadingDerivativeSignTrajectory DnDir (PolyTrajectory px py) = leadingDerivativeSignPoly $ negatePoly py
 
-predictStaticCollisions :: Time -> (Shape,Trajectory) -> Reader World [Collision]
-predictStaticCollisions dt (Rectangle width height, trajectory) = do
-    let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
-    let (xTouchDist,yTouchDist) = ((width+1)/2,(height+1)/2)
-    blocksInBox <-
-        Map2D.rangeInc
-          (ceiling $ xmin - xTouchDist, ceiling $ ymin - yTouchDist)
-          (floor $ xmax + xTouchDist, floor $ ymax + yTouchDist)
-        <$> view blocks
-    return $ do
-      blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
-      let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
-      let collidingWith = SolidBlock blockKey
-      collision@(Collision ctraj ct _ dir) <- join [
-          [Collision ctraj ct collidingWith UpDir | (ctraj, ct) <- xint (yBlock + yTouchDist) trajectory],
-          [Collision ctraj ct collidingWith DnDir | (ctraj, ct) <- xint (yBlock - yTouchDist) trajectory],
-          [Collision ctraj ct collidingWith RtDir | (ctraj, ct) <- yint (xBlock + xTouchDist) trajectory],
-          [Collision ctraj ct collidingWith LfDir | (ctraj, ct) <- yint (xBlock - xTouchDist) trajectory]]
-      guard $ dt > ct && ct >= 0
-      guard $ leadingDerivativeSignTrajectory dir ctraj == LT
-      let (cx, cy) = startPoint ctraj
-      guard $ case dir of
-        UpDir -> abs(xBlock-cx) < xTouchDist
-        DnDir -> abs(xBlock-cx) < xTouchDist
-        RtDir -> abs(yBlock-cy) < yTouchDist
-        LfDir -> abs(yBlock-cy) < yTouchDist
-      return collision
-
-predictStaticCollisionsNEW :: Time -> (SolidObject, Trajectory) -> Reader World [Collision]
-predictStaticCollisionsNEW dt (object, trajectory) = do
+predictStaticCollisions :: Time -> (SolidObject, Trajectory) -> Reader World [Collision]
+predictStaticCollisions dt (object, trajectory) = do
     let ((xmin,xmax),(ymin,ymax)) = trajectoryBox trajectory dt
     let ((boundLeft,boundDown),(boundRight,boundUp)) = boundingBox $ objectShape object
     blocksInBox <-
@@ -219,14 +190,9 @@ predictStaticCollisionsNEW dt (object, trajectory) = do
       blockKey@(xBlockInt,yBlockInt) <- Map2D.keys blocksInBox
       let (xBlock,yBlock) = (fromIntegral xBlockInt,fromIntegral yBlockInt)
       let collidingWith = SolidBlock blockKey
-      NewCollision t (o1,traj1) (o2,traj2) dir <-
-          predictCollisions (object, trajectory) (collidingWith, staticTrajectory (xBlock,yBlock))
-      return $ Collision traj1 t o2 dir
+      predictCollisions (object, trajectory) (collidingWith, staticTrajectory (xBlock,yBlock))
 
---TODO: This collsision contains the trajectory difference, which is not what
---predictStaticCollisions expects.
---I'm rewriting Collision again to have both objects.
-predictCollisions :: (SolidObject, Trajectory) -> (SolidObject, Trajectory) -> [NewCollision]
+predictCollisions :: (SolidObject, Trajectory) -> (SolidObject, Trajectory) -> [Collision]
 predictCollisions (o1, t1) (o2, t2) = case (objectShape o1, objectShape o2) of
   (Rectangle w1 h1, Rectangle w2 h2) -> let
     xTouchDist = (w1 + w2)/2
@@ -246,7 +212,7 @@ predictCollisions (o1, t1) (o2, t2) = case (objectShape o1, objectShape o2) of
         DnDir -> abs cx < xTouchDist
         RtDir -> abs cy < yTouchDist
         LfDir -> abs cy < yTouchDist
-      return $ NewCollision ct (o1, atT ct t1) (o2, atT ct t2) dir
+      return $ Collision ct (o1, atT ct t1) (o2, atT ct t2) dir
 
 walkBlocks :: (IntPt -> IntPt) -> IntPt -> Reader World IntPt
 walkBlocks step x = do
@@ -256,7 +222,7 @@ walkBlocks step x = do
     Just _  -> walkBlocks step $ step x
 
 afterCollision :: Collision -> Movement -> Reader World (Time, Movement)
-afterCollision (Collision _ t _ dir) mov = let
+afterCollision (Collision t _ _ dir) mov = let
     trajectory = movTrajectory mov
     newTrajectory = atT t trajectory
     pt = startPoint newTrajectory
@@ -318,9 +284,9 @@ nonCollisionTransition mov@(NewlyFalling _ _ t) = return $ Just $ let
     newTrajectory = atT t trajectory
     in (t, Falling (startPoint newTrajectory) (startVelocity newTrajectory))
 
-nextTransition :: Time -> Shape -> Movement -> Reader World (Maybe (Time, Movement))
-nextTransition t shape mov = do
-  collisions <- predictStaticCollisions t (shape, movTrajectory mov)
+nextTransition :: Time -> SolidObject -> Movement -> Reader World (Maybe (Time, Movement))
+nextTransition t object mov = do
+  collisions <- predictStaticCollisions t (object, movTrajectory mov)
   collisionTransitions <- filter (/= (0,mov)) <$> traverse (`afterCollision` mov) collisions
   maybeNCTransition <- nonCollisionTransition mov
   return $ minimumByMay (comparing fst) $ filter ((<=t) . fst) $
@@ -373,15 +339,15 @@ checkSupport (x0, y0) = do
 
 --Passing the player as an argument instead of from the world makes
 --it much easier to define recursively.
-timeEvolveMovement :: Time -> Shape -> Movement -> Reader World Movement
-timeEvolveMovement t shape mov = do
+timeEvolveMovement :: Time -> SolidObject -> Movement -> Reader World Movement
+timeEvolveMovement t object mov = do
     movChecked <- case mov of
               Grounded support vx dir -> do
                 let pt = supPosPosition support
                 support' <- checkSupport pt
                 return $ maybe (NewlyFalling pt (vx, 0) jumpGraceTime) (\s -> Grounded s vx dir) support'
               _ -> return mov
-    transition <- nextTransition t shape movChecked
+    transition <- nextTransition t object movChecked
     case transition of
       Nothing -> absorbTrajectory t (atT t $ movTrajectory movChecked) movChecked
-      Just (t', mov') -> timeEvolveMovement (t-t') shape mov'
+      Just (t', mov') -> timeEvolveMovement (t-t') object mov'

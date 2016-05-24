@@ -60,7 +60,7 @@ spec = do
       in (abs x < 3) && (abs y < 3)
     it "In this specific case, a collision should happen on the left side of the wall" $ let
       traj = PolyTrajectory (poly BE [7.5,0.0,2.3]) (poly BE [-2.1])
-      dir = fmap (\ (Collision _ _ _ dir) -> dir) $ minimumByMay (comparing (\ (Collision _ t _ _) -> t)) $
-        runReader (predictStaticCollisions  0.5 (playerShape, traj)) $ addJail $ emptyWorld undefined
+      dir = fmap (\ (Collision _ _ _ dir) -> dir) $ minimumByMay (comparing (\ (Collision t _ _ _) -> t)) $
+        runReader (predictStaticCollisions  0.5 (SolidPlayer, traj)) $ addJail $ emptyWorld undefined
       in dir `shouldBe` Just LfDir
 
